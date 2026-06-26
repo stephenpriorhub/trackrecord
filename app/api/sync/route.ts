@@ -5,7 +5,8 @@ import { airtableFetch, TABLES, classifyInvestmentType } from '@/lib/airtable'
 
 const prisma = new PrismaClient()
 
-const PUB_CODES = ['TPU', 'WAR', 'PMK']
+// Airtable pub codes: MTA = War Room, PMR = Post Market Profits
+const PUB_CODES = ['TPU', 'MTA', 'PMR']
 
 const GURU_NAMES: Record<string, { slug: string; name: string }> = {
   'Bryan Bottarelli': { slug: 'bryan', name: 'Bryan Bottarelli' },
@@ -45,8 +46,8 @@ export async function POST(req: NextRequest) {
 
       const pubGuruMap: Record<string, string[]> = {
         TPU: ['bryan', 'karim'],
-        WAR: ['bryan', 'karim'],
-        PMK: ['karim'],
+        MTA: ['bryan', 'karim'], // War Room
+        PMR: ['karim'],          // Post Market Profits
       }
 
       const guruDbIds: string[] = []

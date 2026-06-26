@@ -4,9 +4,9 @@
 import { useEffect, useState, useCallback } from 'react'
 
 const PUB_OPTIONS = [
-  { value: 'TPU', label: 'Monument Trend Advisory (TPU)' },
-  { value: 'WAR', label: 'War Room (WAR)' },
-  { value: 'PMK', label: 'PMK' },
+  { value: 'TPU', label: 'Monument Trend Advisory' },
+  { value: 'MTA', label: 'MTA War Room' },
+  { value: 'PMR', label: 'Post Market Profits' },
 ]
 
 const GURU_OPTIONS = [
