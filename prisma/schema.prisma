@@ -1,0 +1,98 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Guru {
+  id          String           @id @default(cuid())
+  name        String
+  slug        String           @unique
+  portfolios  PortfolioGuru[]
+  trades      Trade[]
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+}
+
+model Portfolio {
+  id             String           @id @default(cuid())
+  airtableId     String           @unique
+  pubCode        String
+  name           String
+  businessUnit   String
+  status         String
+  gurus          PortfolioGuru[]
+  positions      Position[]
+  syncLogs       SyncLog[]
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+}
+
+model PortfolioGuru {
+  portfolio   Portfolio @relation(fields: [portfolioId], references: [id])
+  portfolioId String
+  guru        Guru      @relation(fields: [guruId], references: [id])
+  guruId      String
+
+  @@id([portfolioId, guruId])
+}
+
+model Position {
+  id               String     @id @default(cuid())
+  airtableId       String     @unique
+  portfolioId      String
+  portfolio        Portfolio  @relation(fields: [portfolioId], references: [id])
+  name             String
+  symbols          String[]
+  status           String
+  investmentType   String
+  positionReturn   Float?
+  openDate         DateTime?
+  closeDate        DateTime?
+  daysHeld         Int?
+  parentPositionId String?
+  parentPosition   Position?  @relation("PartialClose", fields: [parentPositionId], references: [id])
+  childPositions   Position[] @relation("PartialClose")
+  trades           Trade[]
+  createdAt        DateTime   @default(now())
+  updatedAt        DateTime   @updatedAt
+}
+
+model Trade {
+  id                  String    @id @default(cuid())
+  airtableId          String    @unique
+  positionId          String
+  position            Position  @relation(fields: [positionId], references: [id])
+  name                String?
+  symbol              String?
+  action              String?
+  toOpenOrClose       String?
+  weight              Float?
+  tradePrice          Float?
+  tradeDate           DateTime?
+  investmentType      String?
+  optionType          String?
+  buyingPowerRequired Float?
+  marginRequirement   Float?
+  latestPrice         Float?
+  tradeReturn         Float?
+  guruId              String?
+  guru                Guru?     @relation(fields: [guruId], references: [id])
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+}
+
+model SyncLog {
+  id            String     @id @default(cuid())
+  portfolioId   String?
+  portfolio     Portfolio? @relation(fields: [portfolioId], references: [id])
+  pubCode       String
+  status        String
+  recordsSynced Int        @default(0)
+  message       String?
+  startedAt     DateTime   @default(now())
+  completedAt   DateTime?
+}
