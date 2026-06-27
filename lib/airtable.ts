@@ -57,7 +57,7 @@ function extractTypeNames(raw: any): string[] {
 
 // Classify investment type using all three signals: investment type string, action, and option type.
 // This is used at both position level (approximate) and trade level (precise).
-export function classifyInvestmentType(rawTypes: any, action?: string, optionType?: string): string {
+export function classifyInvestmentType(rawTypes: any, action?: string, optionType?: string, toOpenOrClose?: string): string {
   const types = extractTypeNames(rawTypes).map(t => t.toLowerCase())
   if (types.some(t => t.includes('crypto'))) return 'CRYPTO'
   if (types.some(t => t.includes('forex'))) return 'FOREX'
@@ -65,9 +65,12 @@ export function classifyInvestmentType(rawTypes: any, action?: string, optionTyp
   const isOption = types.some(t => t.includes('option')) || !!(optionType && optionType.trim())
   if (isOption) {
     const isSell = (action || '').toLowerCase() === 'sell'
+    // Income classification only applies to opening trades (Sell to Open = income strategy)
+    // A closing "Sell" is simply exiting a long position — not income
+    const isOpeningTrade = !toOpenOrClose || (toOpenOrClose || '').toLowerCase() === 'open'
     const opt = (optionType || '').toLowerCase()
-    if (isSell && opt.includes('call')) return 'COVERED_CALL'
-    if (isSell) return 'PUT_SELL'
+    if (isSell && isOpeningTrade && opt.includes('call')) return 'COVERED_CALL'
+    if (isSell && isOpeningTrade && opt.includes('put')) return 'PUT_SELL'
     if (opt.includes('put')) return 'PUT'
     return 'CALL'
   }

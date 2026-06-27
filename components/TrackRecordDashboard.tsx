@@ -205,8 +205,7 @@ export default function TrackRecordDashboard() {
     set(arr.includes(val) ? arr.filter(v => v !== val) : [...arr, val])
   }
 
-  const d = stats?.directional
-  const inc = stats?.income
+  const s = stats?.summary
 
   return (
     <div className="min-h-screen bg-gray-950 text-white">
@@ -255,108 +254,54 @@ export default function TrackRecordDashboard() {
           </div>
         </div>
 
-        {d && (
+        {s && (
           <div className="mb-6">
             <div className="flex items-center gap-3 mb-3">
-              <div className="text-xs text-gray-500 uppercase tracking-wide">Directional Trades</div>
-              <div className="text-xs text-gray-600">{d.total.toLocaleString()} closed · {stats?.openCount ?? 0} open</div>
+              <div className="text-xs text-gray-500 uppercase tracking-wide">Trade Summary</div>
+              <div className="text-xs text-gray-600">{s.total.toLocaleString()} closed · {stats?.openCount ?? 0} open</div>
             </div>
             <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3">
               <div className="bg-gray-900 border border-gray-800 rounded-lg p-4">
                 <div className="text-xs text-gray-500 uppercase tracking-wide mb-1"># of Trades</div>
-                <div className="text-2xl font-bold text-white">{d.total.toLocaleString()}</div>
-                <div className="text-xs text-gray-600 mt-1">{d.winners}W · {d.losers}L</div>
+                <div className="text-2xl font-bold text-white">{s.total.toLocaleString()}</div>
+                <div className="text-xs text-gray-600 mt-1">{s.winners}W · {s.losers}L</div>
               </div>
               <div className="bg-gray-900 border border-gray-800 rounded-lg p-4">
                 <div className="text-xs text-gray-500 uppercase tracking-wide mb-1"># of Winners</div>
-                <div className="text-2xl font-bold text-green-400">{d.winners.toLocaleString()}</div>
-                <div className="text-xs text-gray-600 mt-1">{d.losers} losers</div>
+                <div className="text-2xl font-bold text-green-400">{s.winners.toLocaleString()}</div>
+                <div className="text-xs text-gray-600 mt-1">{s.losers} losers</div>
               </div>
               <div className="bg-gray-900 border border-gray-800 rounded-lg p-4">
                 <div className="text-xs text-gray-500 uppercase tracking-wide mb-1">Win Rate</div>
-                <div className="text-2xl font-bold text-white">{d.winRate}%</div>
-                <div className="text-xs text-gray-600 mt-1">{d.winners}/{d.total}</div>
+                <div className="text-2xl font-bold text-white">{s.winRate}%</div>
+                <div className="text-xs text-gray-600 mt-1">{s.winners}/{s.total}</div>
               </div>
               <div className="bg-gray-900 border border-gray-800 rounded-lg p-4">
                 <div className="text-xs text-gray-500 uppercase tracking-wide mb-1">Avg Trade</div>
-                <div className={`text-2xl font-bold ${statColor(d.avgReturn)}`}>
-                  {d.avgReturn !== null ? `${d.avgReturn >= 0 ? '+' : ''}${d.avgReturn}%` : '—'}
+                <div className={`text-2xl font-bold ${statColor(s.avgReturn)}`}>
+                  {s.avgReturn !== null ? `${s.avgReturn >= 0 ? '+' : ''}${s.avgReturn}%` : '—'}
                 </div>
                 <div className="text-xs text-gray-600 mt-1">simple avg</div>
               </div>
               <div className="bg-gray-900 border border-gray-800 rounded-lg p-4">
                 <div className="text-xs text-gray-500 uppercase tracking-wide mb-1">Avg Weighted</div>
-                <div className={`text-2xl font-bold ${statColor(d.avgWeightedReturn)}`}>
-                  {d.avgWeightedReturn !== null ? `${d.avgWeightedReturn >= 0 ? '+' : ''}${d.avgWeightedReturn}%` : '—'}
+                <div className={`text-2xl font-bold ${statColor(s.avgWeightedReturn)}`}>
+                  {s.avgWeightedReturn !== null ? `${s.avgWeightedReturn >= 0 ? '+' : ''}${s.avgWeightedReturn}%` : '—'}
                 </div>
                 <div className="text-xs text-gray-600 mt-1">by position size</div>
               </div>
               <div className="bg-gray-900 border border-gray-800 rounded-lg p-4">
                 <div className="text-xs text-gray-500 uppercase tracking-wide mb-1">Avg Duration</div>
-                <div className="text-2xl font-bold text-white">{d.avgDaysHeld ? `${d.avgDaysHeld}d` : '—'}</div>
+                <div className="text-2xl font-bold text-white">{s.avgDaysHeld ? `${s.avgDaysHeld}d` : '—'}</div>
                 <div className="text-xs text-gray-600 mt-1">days held</div>
               </div>
               <div className="bg-gray-900 border border-gray-800 rounded-lg p-4">
                 <div className="text-xs text-gray-500 uppercase tracking-wide mb-1">Largest Trade</div>
                 <div className="text-2xl font-bold text-green-400">
-                  {d.largestWinner !== null ? `+${d.largestWinner}%` : '—'}
+                  {s.largestWinner !== null ? `+${s.largestWinner}%` : '—'}
                 </div>
-                <div className={`text-xs mt-1 ${statColor(d.largestLoser)}`}>
-                  worst: {d.largestLoser !== null ? `${d.largestLoser}%` : '—'}
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {inc && inc.total > 0 && (
-          <div className="mb-6">
-            <div className="flex items-center gap-3 mb-3">
-              <div className="text-xs text-yellow-600 uppercase tracking-wide">Income Strategies</div>
-              <div className="text-xs text-gray-600">Put-Sell &amp; Covered Calls — return on buying power</div>
-            </div>
-            <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3">
-              <div className="bg-gray-900 border border-yellow-900/30 rounded-lg p-4">
-                <div className="text-xs text-gray-500 uppercase tracking-wide mb-1"># of Trades</div>
-                <div className="text-2xl font-bold text-white">{inc.total.toLocaleString()}</div>
-                <div className="text-xs text-gray-600 mt-1">{inc.winners}W · {inc.losers}L</div>
-              </div>
-              <div className="bg-gray-900 border border-yellow-900/30 rounded-lg p-4">
-                <div className="text-xs text-gray-500 uppercase tracking-wide mb-1"># of Winners</div>
-                <div className="text-2xl font-bold text-green-400">{inc.winners.toLocaleString()}</div>
-                <div className="text-xs text-gray-600 mt-1">{inc.losers} losers</div>
-              </div>
-              <div className="bg-gray-900 border border-yellow-900/30 rounded-lg p-4">
-                <div className="text-xs text-gray-500 uppercase tracking-wide mb-1">Win Rate</div>
-                <div className="text-2xl font-bold text-white">{inc.winRate}%</div>
-                <div className="text-xs text-gray-600 mt-1">{inc.winners}/{inc.total}</div>
-              </div>
-              <div className="bg-gray-900 border border-yellow-900/30 rounded-lg p-4">
-                <div className="text-xs text-gray-500 uppercase tracking-wide mb-1">Avg Trade (BP)</div>
-                <div className={`text-2xl font-bold ${statColor(inc.avgReturn)}`}>
-                  {inc.avgReturn !== null ? `${inc.avgReturn >= 0 ? '+' : ''}${inc.avgReturn}%` : '—'}
-                </div>
-                <div className="text-xs text-gray-600 mt-1">on buying power</div>
-              </div>
-              <div className="bg-gray-900 border border-yellow-900/30 rounded-lg p-4">
-                <div className="text-xs text-gray-500 uppercase tracking-wide mb-1">Avg Weighted</div>
-                <div className={`text-2xl font-bold ${statColor(inc.avgWeightedReturn)}`}>
-                  {inc.avgWeightedReturn !== null ? `${inc.avgWeightedReturn >= 0 ? '+' : ''}${inc.avgWeightedReturn}%` : '—'}
-                </div>
-                <div className="text-xs text-gray-600 mt-1">by position size</div>
-              </div>
-              <div className="bg-gray-900 border border-yellow-900/30 rounded-lg p-4">
-                <div className="text-xs text-gray-500 uppercase tracking-wide mb-1">Avg Duration</div>
-                <div className="text-2xl font-bold text-white">{inc.avgDaysHeld ? `${inc.avgDaysHeld}d` : '—'}</div>
-                <div className="text-xs text-gray-600 mt-1">days held</div>
-              </div>
-              <div className="bg-gray-900 border border-yellow-900/30 rounded-lg p-4">
-                <div className="text-xs text-gray-500 uppercase tracking-wide mb-1">Largest Trade</div>
-                <div className="text-2xl font-bold text-green-400">
-                  {inc.largestWinner !== null ? `+${inc.largestWinner}%` : '—'}
-                </div>
-                <div className={`text-xs mt-1 ${statColor(inc.largestLoser)}`}>
-                  worst: {inc.largestLoser !== null ? `${inc.largestLoser}%` : '—'}
+                <div className={`text-xs mt-1 ${statColor(s.largestLoser)}`}>
+                  worst: {s.largestLoser !== null ? `${s.largestLoser}%` : '—'}
                 </div>
               </div>
             </div>

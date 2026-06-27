@@ -140,10 +140,12 @@ async function syncPub(pubCode: string, tradesByPositionId: Map<string, any[]>) 
         const tf = aTrade.fields
         const action = tf['Action']?.name || tf['Action'] || ''
         const optionType = tf['Option Type']?.name || tf['Option Type'] || ''
+        const toOpenOrClose = tf['To Open or Close']?.name || tf['To Open or Close'] || ''
         const tradeInvType = classifyInvestmentType(
           tf['Investment Type'] ? [tf['Investment Type']?.name || tf['Investment Type']] : [],
           action,
-          optionType
+          optionType,
+          toOpenOrClose
         )
         tradeTypes.push(tradeInvType)
 

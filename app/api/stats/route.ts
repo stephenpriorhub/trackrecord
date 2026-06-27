@@ -4,8 +4,6 @@ import { PrismaClient } from '@prisma/client'
 
 const prisma = new PrismaClient()
 
-const INCOME_TYPES = ['PUT_SELL', 'COVERED_CALL']
-const DIRECTIONAL_TYPES = ['STOCK', 'CALL', 'PUT', 'SPREAD', 'CRYPTO', 'FOREX', 'OTHER']
 
 export async function GET(req: NextRequest) {
   const { searchParams } = req.nextUrl
@@ -83,9 +81,6 @@ export async function GET(req: NextRequest) {
     }
   }
 
-  const directional = closed.filter(p => DIRECTIONAL_TYPES.includes(p.investmentType))
-  const income = closed.filter(p => INCOME_TYPES.includes(p.investmentType))
-
   const openWhere: any = {
     parentPositionId: null,
     status: 'Open',
@@ -95,8 +90,7 @@ export async function GET(req: NextRequest) {
   const openCount = await prisma.position.count({ where: openWhere })
 
   return NextResponse.json({
-    directional: calc(directional),
-    income: calc(income),
+    summary: calc(closed),
     openCount,
   })
 }
