@@ -89,6 +89,14 @@ export async function POST(req: NextRequest) {
       }
 
       const portfolioName = fields['Portfolio Name']
+      if (!portfolioName) {
+        await prisma.syncLog.update({
+          where: { id: log.id },
+          data: { status: 'error', message: `Portfolio Name is blank for ${pubCode}`, completedAt: new Date() },
+        })
+        results.push({ pubCode, status: 'error', message: 'Portfolio Name is blank' })
+        continue
+      }
       const positionRecords = await airtableFetch(TABLES.positions, {
         filterByFormula: `FIND("${portfolioName}", ARRAYJOIN({Portfolio Name (from Portfolio)}))`,
       })

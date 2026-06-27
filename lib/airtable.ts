@@ -31,12 +31,41 @@ export async function airtableFetch(table: string, params: Record<string, string
   return records
 }
 
-export function classifyInvestmentType(rawTypes: string[], action?: string): string {
-  const types = (rawTypes || []).map(t => (t || '').toLowerCase())
+// Airtable multipleLookupValues returns either a flat string[] or a nested object
+// with { linkedRecordIds, valuesByLinkedRecordId: { recXXX: [{id, name, color}][] } }
+// This helper extracts the string names regardless of which shape is returned.
+function extractTypeNames(raw: any): string[] {
+  if (!raw) return []
+  // Flat string array (e.g. from a direct singleSelect field)
+  if (Array.isArray(raw)) {
+    return raw.map((v: any) => {
+      if (typeof v === 'string') return v
+      if (v && typeof v === 'object' && v.name) return String(v.name)
+      return ''
+    }).filter(Boolean)
+  }
+  // multipleLookupValues nested object shape
+  if (raw && typeof raw === 'object' && raw.valuesByLinkedRecordId) {
+    const names: string[] = []
+    for (const values of Object.values(raw.valuesByLinkedRecordId) as any[][]) {
+      for (const v of values) {
+        if (v && typeof v === 'object' && v.name) names.push(String(v.name))
+        else if (typeof v === 'string') names.push(v)
+      }
+    }
+    return names
+  }
+  return []
+}
+
+export function classifyInvestmentType(rawTypes: any, action?: string): string {
+  const types = extractTypeNames(rawTypes).map(t => t.toLowerCase())
   if (types.some(t => t.includes('crypto'))) return 'CRYPTO'
   if (types.some(t => t.includes('forex'))) return 'FOREX'
   if (types.some(t => t.includes('option'))) {
-    if (action?.toLowerCase() === 'sell') return 'PUT_SELL'
+    // Classify by option type and action
+    const actionLower = (action || '').toLowerCase()
+    if (actionLower === 'sell') return 'PUT_SELL'
     return 'CALL'
   }
   if (types.some(t => t.includes('stock') || t.includes('equity'))) return 'STOCK'
