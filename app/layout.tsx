@@ -14,13 +14,13 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="en">
       <body className={`${inter.className} bg-gray-950 text-white`}>
-        {children}
         <Script
           src="https://oxfordhub.app/hub-nav.js"
-          data-project-id={process.env.NEXT_PUBLIC_HUB_PROJECT_ID || 'trackrecord'}
+          data-project-id={process.env.NEXT_PUBLIC_HUB_PROJECT_ID || 'PLACEHOLDER_PROJECT_ID'}
           strategy="afterInteractive"
           id="hub-nav"
         />
+        {children}
       </body>
     </html>
   )

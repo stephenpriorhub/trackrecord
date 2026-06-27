@@ -1,5 +1,8 @@
 @import "tailwindcss";
 
+/* Hub auth: keep page hidden until hub-nav.js confirms auth and sets visibility = "visible" */
+html { visibility: hidden; }
+
 :root {
   --background: #ffffff;
   --foreground: #171717;
