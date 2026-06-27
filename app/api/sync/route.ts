@@ -142,9 +142,11 @@ export async function POST(req: NextRequest) {
         for (const aTrade of tradeRecords) {
           const tf = aTrade.fields
           const action = tf['Action']?.name || tf['Action'] || ''
+          const optionType = tf['Option Type']?.name || tf['Option Type'] || ''
           const tradeInvType = classifyInvestmentType(
             tf['Investment Type'] ? [tf['Investment Type']?.name || tf['Investment Type']] : [],
-            action
+            action,
+            optionType
           )
 
           await prisma.trade.upsert({

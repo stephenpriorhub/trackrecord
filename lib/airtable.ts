@@ -33,10 +33,8 @@ export async function airtableFetch(table: string, params: Record<string, string
 
 // Airtable multipleLookupValues returns either a flat string[] or a nested object
 // with { linkedRecordIds, valuesByLinkedRecordId: { recXXX: [{id, name, color}][] } }
-// This helper extracts the string names regardless of which shape is returned.
 function extractTypeNames(raw: any): string[] {
   if (!raw) return []
-  // Flat string array (e.g. from a direct singleSelect field)
   if (Array.isArray(raw)) {
     return raw.map((v: any) => {
       if (typeof v === 'string') return v
@@ -44,7 +42,6 @@ function extractTypeNames(raw: any): string[] {
       return ''
     }).filter(Boolean)
   }
-  // multipleLookupValues nested object shape
   if (raw && typeof raw === 'object' && raw.valuesByLinkedRecordId) {
     const names: string[] = []
     for (const values of Object.values(raw.valuesByLinkedRecordId) as any[][]) {
@@ -58,14 +55,18 @@ function extractTypeNames(raw: any): string[] {
   return []
 }
 
-export function classifyInvestmentType(rawTypes: any, action?: string): string {
+// Classify investment type using all three signals: investment type string, action, and option type.
+// This is used at both position level (approximate) and trade level (precise).
+export function classifyInvestmentType(rawTypes: any, action?: string, optionType?: string): string {
   const types = extractTypeNames(rawTypes).map(t => t.toLowerCase())
   if (types.some(t => t.includes('crypto'))) return 'CRYPTO'
   if (types.some(t => t.includes('forex'))) return 'FOREX'
   if (types.some(t => t.includes('option'))) {
-    // Classify by option type and action
-    const actionLower = (action || '').toLowerCase()
-    if (actionLower === 'sell') return 'PUT_SELL'
+    const isSell = (action || '').toLowerCase() === 'sell'
+    const opt = (optionType || '').toLowerCase()
+    if (isSell && opt.includes('call')) return 'COVERED_CALL'
+    if (isSell) return 'PUT_SELL'   // sell put or unspecified sell
+    if (opt.includes('put')) return 'PUT'
     return 'CALL'
   }
   if (types.some(t => t.includes('stock') || t.includes('equity'))) return 'STOCK'

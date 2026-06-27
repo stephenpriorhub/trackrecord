@@ -13,42 +13,73 @@ export async function GET(req: NextRequest) {
   const gurus = searchParams.get('gurus')?.split(',').filter(Boolean) || []
   const types = searchParams.get('types')?.split(',').filter(Boolean) || []
 
-  const baseWhere: any = {
+  const portfolioFilter: any = { businessUnit: 'Monument Traders Alliance' }
+  if (pubCodes.length > 0) portfolioFilter.pubCode = { in: pubCodes }
+  if (gurus.length > 0) portfolioFilter.gurus = { some: { guru: { slug: { in: gurus } } } }
+
+  const closedWhere: any = {
     parentPositionId: null,
     status: 'Closed',
-    positionReturn: { not: null },
-    portfolio: { businessUnit: 'Monument Traders Alliance' },
+    portfolio: portfolioFilter,
   }
+  if (types.length > 0) closedWhere.investmentType = { in: types }
 
-  if (pubCodes.length > 0) baseWhere.portfolio = { ...baseWhere.portfolio, pubCode: { in: pubCodes } }
-  if (gurus.length > 0) {
-    baseWhere.portfolio = {
-      ...baseWhere.portfolio,
-      gurus: { some: { guru: { slug: { in: gurus } } } },
-    }
-  }
-  if (types.length > 0) baseWhere.investmentType = { in: types }
-
+  // Fetch all closed positions including their trades (for weighted avg calculation)
   const closed = await prisma.position.findMany({
-    where: baseWhere,
-    select: { positionReturn: true, investmentType: true, daysHeld: true },
+    where: closedWhere,
+    select: {
+      positionReturn: true,
+      investmentType: true,
+      daysHeld: true,
+      trades: { select: { buyingPowerRequired: true } },
+    },
   })
 
-  const calc = (positions: typeof closed) => {
-    const returns = positions.map(p => p.positionReturn!).filter(r => r !== null)
-    if (returns.length === 0) return null
+  function calc(positions: typeof closed) {
+    if (positions.length === 0) return null
+
+    const withReturn = positions.filter(p => p.positionReturn !== null)
+    const noReturn = positions.filter(p => p.positionReturn === null)
+    const returns = withReturn.map(p => p.positionReturn!)
     const winners = returns.filter(r => r > 0)
     const losers = returns.filter(r => r <= 0)
-    const avgDays = positions.map(p => p.daysHeld).filter(Boolean) as number[]
+    const daysArr = withReturn.map(p => p.daysHeld).filter((d): d is number => d !== null)
+
+    // Simple average return (pct, 1 decimal)
+    const avgReturn = returns.length
+      ? Math.round((returns.reduce((a, b) => a + b, 0) / returns.length) * 1000) / 10
+      : null
+
+    // Buying-power weighted average return
+    // For each position, sum trade-level buyingPowerRequired as position weight.
+    // Falls back to equal weight (1) when BP data is unavailable.
+    let weightedSum = 0
+    let totalWeight = 0
+    for (const p of withReturn) {
+      const bp = p.trades.reduce((sum, t) => sum + (t.buyingPowerRequired ?? 0), 0)
+      const weight = bp > 0 ? bp : 1
+      weightedSum += p.positionReturn! * weight
+      totalWeight += weight
+    }
+    const avgWeightedReturn = totalWeight > 0
+      ? Math.round((weightedSum / totalWeight) * 1000) / 10
+      : null
+
     return {
-      total: returns.length,
+      total: withReturn.length,
+      unresolvedCount: noReturn.length,
       winners: winners.length,
       losers: losers.length,
-      winRate: Math.round((winners.length / returns.length) * 1000) / 10,
-      avgReturn: Math.round((returns.reduce((a, b) => a + b, 0) / returns.length) * 1000) / 10,
-      largestWinner: Math.round(Math.max(...returns) * 1000) / 10,
-      largestLoser: Math.round(Math.min(...returns) * 1000) / 10,
-      avgDaysHeld: avgDays.length ? Math.round(avgDays.reduce((a, b) => a + b, 0) / avgDays.length) : null,
+      winRate: withReturn.length > 0
+        ? Math.round((winners.length / withReturn.length) * 1000) / 10
+        : 0,
+      avgReturn,
+      avgWeightedReturn,
+      largestWinner: returns.length ? Math.round(Math.max(...returns) * 1000) / 10 : null,
+      largestLoser: returns.length ? Math.round(Math.min(...returns) * 1000) / 10 : null,
+      avgDaysHeld: daysArr.length
+        ? Math.round(daysArr.reduce((a, b) => a + b, 0) / daysArr.length)
+        : null,
     }
   }
 
@@ -58,10 +89,9 @@ export async function GET(req: NextRequest) {
   const openWhere: any = {
     parentPositionId: null,
     status: 'Open',
-    portfolio: baseWhere.portfolio,
+    portfolio: portfolioFilter,
   }
   if (types.length > 0) openWhere.investmentType = { in: types }
-
   const openCount = await prisma.position.count({ where: openWhere })
 
   return NextResponse.json({
