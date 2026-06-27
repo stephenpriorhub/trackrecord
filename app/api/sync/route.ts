@@ -131,6 +131,9 @@ async function syncPub(pubCode: string) {
         filterByFormula: `FIND("${aPos.id}", ARRAYJOIN({Parent Position}))`,
       })
 
+      // Track trade-level types to back-fill position investmentType with full context
+      const tradeTypes: string[] = []
+
       for (const aTrade of tradeRecords) {
         const tf = aTrade.fields
         const action = tf['Action']?.name || tf['Action'] || ''
@@ -140,6 +143,7 @@ async function syncPub(pubCode: string) {
           action,
           optionType
         )
+        tradeTypes.push(tradeInvType)
 
         await prisma.trade.upsert({
           where: { airtableId: aTrade.id },
@@ -175,6 +179,26 @@ async function syncPub(pubCode: string) {
             latestPrice: tf['Latest Price'] ?? null,
             tradeReturn: tf['Trade Return'] ?? null,
           },
+        })
+      }
+
+      // Back-fill position investmentType using trade-level precision
+      // Priority: PUT_SELL/COVERED_CALL > CALL/PUT > STOCK > OTHER
+      const INCOME = ['PUT_SELL', 'COVERED_CALL']
+      const DIRECTIONAL_OPTIONS = ['CALL', 'PUT']
+      let refinedType = investmentType
+      if (tradeTypes.some(t => INCOME.includes(t))) {
+        // Use the first income type found (PUT_SELL takes precedence)
+        refinedType = tradeTypes.find(t => t === 'PUT_SELL') || tradeTypes.find(t => INCOME.includes(t)) || investmentType
+      } else if (tradeTypes.some(t => DIRECTIONAL_OPTIONS.includes(t))) {
+        refinedType = tradeTypes.find(t => DIRECTIONAL_OPTIONS.includes(t)) || investmentType
+      } else if (tradeTypes.length > 0 && investmentType === 'OTHER') {
+        refinedType = tradeTypes[0]
+      }
+      if (refinedType !== investmentType) {
+        await prisma.position.update({
+          where: { id: position.id },
+          data: { investmentType: refinedType },
         })
       }
     }
