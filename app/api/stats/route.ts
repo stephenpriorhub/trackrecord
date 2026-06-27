@@ -10,6 +10,8 @@ export async function GET(req: NextRequest) {
   const pubCodes = searchParams.get('pubCodes')?.split(',').filter(Boolean) || []
   const gurus = searchParams.get('gurus')?.split(',').filter(Boolean) || []
   const types = searchParams.get('types')?.split(',').filter(Boolean) || []
+  const spreadTypes = searchParams.get('spreadTypes')?.split(',').filter(Boolean) || []
+  const statusFilter = searchParams.get('status') || 'all'
 
   const portfolioFilter: any = { businessUnit: 'Monument Traders Alliance' }
   if (pubCodes.length > 0) portfolioFilter.pubCode = { in: pubCodes }
@@ -21,6 +23,7 @@ export async function GET(req: NextRequest) {
     portfolio: portfolioFilter,
   }
   if (types.length > 0) closedWhere.investmentType = { in: types }
+  if (spreadTypes.length > 0) closedWhere.spreadType = { in: spreadTypes }
 
   // Fetch all closed positions including their trades (for weighted avg calculation)
   const closed = await prisma.position.findMany({
@@ -87,10 +90,14 @@ export async function GET(req: NextRequest) {
     portfolio: portfolioFilter,
   }
   if (types.length > 0) openWhere.investmentType = { in: types }
+  if (spreadTypes.length > 0) openWhere.spreadType = { in: spreadTypes }
   const openCount = await prisma.position.count({ where: openWhere })
 
+  // When filtering to open-only, closed stats are not relevant
+  const summary = statusFilter === 'open' ? null : calc(closed)
+
   return NextResponse.json({
-    summary: calc(closed),
+    summary,
     openCount,
   })
 }

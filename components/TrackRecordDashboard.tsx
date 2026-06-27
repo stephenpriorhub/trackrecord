@@ -54,6 +54,38 @@ const SPREAD_LABELS: Record<string, string> = {
   DIAGONAL: 'Diagonal',
 }
 
+function getSpreadReason(spreadType: string, posName: string): string {
+  const n = posName.toLowerCase()
+  switch (spreadType) {
+    case 'IRON_CONDOR':
+      return n.includes('iron condor')
+        ? 'Position name contains "iron condor"'
+        : 'Has both call and put legs with 4+ trades'
+    case 'STRANGLE':
+      return n.includes('strangle')
+        ? 'Position name contains "strangle"'
+        : 'Has both call and put legs'
+    case 'CALENDAR':
+      return 'Position name contains "calendar"'
+    case 'DIAGONAL':
+      return 'Position name contains "diagonal"'
+    case 'PUT_CREDIT_SPREAD':
+      return n.includes('credit spread') || n.includes('put credit')
+        ? 'Position name contains credit spread terms'
+        : 'Strike range pattern detected in name (e.g. $150/$145 put)'
+    case 'CALL_CREDIT_SPREAD':
+      return n.includes('credit spread') || n.includes('call credit')
+        ? 'Position name contains credit spread terms'
+        : 'Strike range pattern detected in name (e.g. $150/$155 call)'
+    case 'PUT_DEBIT_SPREAD':
+      return n.includes('put spread') ? 'Position name contains "put spread"' : 'Position name contains "debit spread" with put'
+    case 'CALL_DEBIT_SPREAD':
+      return n.includes('call spread') ? 'Position name contains "call spread"' : 'Position name contains "debit spread" with call'
+    default:
+      return spreadType
+  }
+}
+
 // positionReturn is stored as a decimal (0.18 = 18%)
 function returnColor(r: number | null | undefined) {
   if (r === null || r === undefined) return 'text-gray-400'
@@ -383,7 +415,10 @@ export default function TrackRecordDashboard() {
                       </td>
                       <td className="px-3 py-3">
                         {pos.spreadType ? (
-                          <span className="text-xs bg-purple-900/40 text-purple-300 border border-purple-800/50 rounded px-2 py-0.5">
+                          <span
+                            title={getSpreadReason(pos.spreadType, pos.name || '')}
+                            className="text-xs bg-purple-900/40 text-purple-300 border border-purple-800/50 rounded px-2 py-0.5 cursor-help"
+                          >
                             {SPREAD_LABELS[pos.spreadType] ?? pos.spreadType}
                           </span>
                         ) : null}
