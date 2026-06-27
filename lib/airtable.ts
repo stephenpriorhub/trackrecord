@@ -61,11 +61,13 @@ export function classifyInvestmentType(rawTypes: any, action?: string, optionTyp
   const types = extractTypeNames(rawTypes).map(t => t.toLowerCase())
   if (types.some(t => t.includes('crypto'))) return 'CRYPTO'
   if (types.some(t => t.includes('forex'))) return 'FOREX'
-  if (types.some(t => t.includes('option'))) {
+  // Treat as option if Investment Type says "option" OR if optionType field is populated
+  const isOption = types.some(t => t.includes('option')) || !!(optionType && optionType.trim())
+  if (isOption) {
     const isSell = (action || '').toLowerCase() === 'sell'
     const opt = (optionType || '').toLowerCase()
     if (isSell && opt.includes('call')) return 'COVERED_CALL'
-    if (isSell) return 'PUT_SELL'   // sell put or unspecified sell
+    if (isSell) return 'PUT_SELL'
     if (opt.includes('put')) return 'PUT'
     return 'CALL'
   }
