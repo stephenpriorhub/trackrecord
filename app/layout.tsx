@@ -16,7 +16,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <body className={`${inter.className} bg-gray-950 text-white`}>
         <Script
           src="https://oxfordhub.app/hub-nav.js"
-          data-project-id={process.env.NEXT_PUBLIC_HUB_PROJECT_ID || 'PLACEHOLDER_PROJECT_ID'}
+          data-project-id={process.env.NEXT_PUBLIC_HUB_PROJECT_ID || 'mta-track-record'}
           strategy="afterInteractive"
           id="hub-nav"
         />
