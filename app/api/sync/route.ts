@@ -93,6 +93,24 @@ async function syncPub(pubCode: string) {
       filterByFormula: `FIND("${portfolioName}", ARRAYJOIN({Portfolio Name (from Portfolio)}))`,
     })
 
+    // Batch-fetch ALL trades in one pass and group by parent position ID.
+    // filterByFormula FIND+ARRAYJOIN on a linked field returns names, not IDs —
+    // so per-position fetch returns 0 results. Instead, fetch once and group in memory.
+    const portfolioPositionIds = new Set(positionRecords.map((p: any) => p.id))
+    const allTradeRecords = await airtableFetch(TABLES.trades)
+    const tradesByPositionId = new Map<string, any[]>()
+    for (const trade of allTradeRecords) {
+      const parentLinks = trade.fields['Parent Position']
+      const links = Array.isArray(parentLinks) ? parentLinks : []
+      for (const link of links) {
+        const linkId = typeof link === 'object' ? link.id : link
+        if (linkId && portfolioPositionIds.has(linkId)) {
+          if (!tradesByPositionId.has(linkId)) tradesByPositionId.set(linkId, [])
+          tradesByPositionId.get(linkId)!.push(trade)
+        }
+      }
+    }
+
     let synced = 0
 
     for (const aPos of positionRecords) {
@@ -127,9 +145,7 @@ async function syncPub(pubCode: string) {
       })
       synced++
 
-      const tradeRecords = await airtableFetch(TABLES.trades, {
-        filterByFormula: `FIND("${aPos.id}", ARRAYJOIN({Parent Position}))`,
-      })
+      const tradeRecords = tradesByPositionId.get(aPos.id) || []
 
       // Track trade-level types to back-fill position investmentType with full context
       const tradeTypes: string[] = []
