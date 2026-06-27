@@ -3,6 +3,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { PrismaClient } from '@prisma/client'
 import { airtableFetch, TABLES, classifyInvestmentType } from '@/lib/airtable'
 
+export const maxDuration = 300 // 5 minutes — sync can be long
+
 const prisma = new PrismaClient()
 
 // Airtable pub codes: MTA = War Room, PMR = Post Market Profits
