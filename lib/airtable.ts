@@ -74,3 +74,34 @@ export function classifyInvestmentType(rawTypes: any, action?: string, optionTyp
   if (types.some(t => t.includes('stock') || t.includes('equity'))) return 'STOCK'
   return 'OTHER'
 }
+
+// Detect options spread structure from position name and trade list
+export function detectSpreadType(positionName: string, trades: any[]): string | null {
+  const n = positionName.toLowerCase()
+  if (n.includes('iron condor')) return 'IRON_CONDOR'
+  if (n.includes('strangle')) return 'STRANGLE'
+  if (n.includes('calendar')) return 'CALENDAR'
+  if (n.includes('diagonal')) return 'DIAGONAL'
+  if (n.includes('credit spread') || n.includes('put credit')) {
+    if (n.includes('call')) return 'CALL_CREDIT_SPREAD'
+    return 'PUT_CREDIT_SPREAD'
+  }
+  if (n.includes('call credit')) return 'CALL_CREDIT_SPREAD'
+  if (n.includes('debit spread')) {
+    if (n.includes('call')) return 'CALL_DEBIT_SPREAD'
+    return 'PUT_DEBIT_SPREAD'
+  }
+  if (n.includes('put spread')) return 'PUT_DEBIT_SPREAD'
+  if (n.includes('call spread')) return 'CALL_DEBIT_SPREAD'
+  // Detect from trade structure: both calls + puts present = strangle/condor
+  const hasCall = trades.some(t => (t.fields?.['Option Type']?.name || t.fields?.['Option Type'] || '').toLowerCase() === 'call')
+  const hasPut  = trades.some(t => (t.fields?.['Option Type']?.name || t.fields?.['Option Type'] || '').toLowerCase() === 'put')
+  if (hasCall && hasPut && trades.length >= 4) return 'IRON_CONDOR'
+  if (hasCall && hasPut) return 'STRANGLE'
+  // Two different strikes in the name ( "$155-$150" or "$47 / $46.5" )
+  if (/\$[\d.]+\s*[-\/]\s*\$[\d.]+/.test(n) || n.match(/\d+\s*-\s*\d+\s*put/) || n.match(/\d+\s*-\s*\d+\s*call/)) {
+    if (n.includes('put')) return 'PUT_CREDIT_SPREAD'
+    if (n.includes('call')) return 'CALL_CREDIT_SPREAD'
+  }
+  return null
+}

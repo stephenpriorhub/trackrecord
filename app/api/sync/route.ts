@@ -2,7 +2,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { after } from 'next/server'
 import { PrismaClient } from '@prisma/client'
-import { airtableFetch, TABLES, classifyInvestmentType } from '@/lib/airtable'
+import { airtableFetch, TABLES, classifyInvestmentType, detectSpreadType } from '@/lib/airtable'
 
 const prisma = new PrismaClient()
 
@@ -15,7 +15,7 @@ const GURU_NAMES: Record<string, { slug: string; name: string }> = {
   'Nate Bear': { slug: 'nate', name: 'Nate Bear' },
 }
 
-async function syncPub(pubCode: string) {
+async function syncPub(pubCode: string, tradesByPositionId: Map<string, any[]>) {
   const log = await prisma.syncLog.create({
     data: { pubCode, status: 'running' },
   })
@@ -93,24 +93,6 @@ async function syncPub(pubCode: string) {
       filterByFormula: `FIND("${portfolioName}", ARRAYJOIN({Portfolio Name (from Portfolio)}))`,
     })
 
-    // Batch-fetch ALL trades in one pass and group by parent position ID.
-    // filterByFormula FIND+ARRAYJOIN on a linked field returns names, not IDs —
-    // so per-position fetch returns 0 results. Instead, fetch once and group in memory.
-    const portfolioPositionIds = new Set(positionRecords.map((p: any) => p.id))
-    const allTradeRecords = await airtableFetch(TABLES.trades)
-    const tradesByPositionId = new Map<string, any[]>()
-    for (const trade of allTradeRecords) {
-      const parentLinks = trade.fields['Parent Position']
-      const links = Array.isArray(parentLinks) ? parentLinks : []
-      for (const link of links) {
-        const linkId = typeof link === 'object' ? link.id : link
-        if (linkId && portfolioPositionIds.has(linkId)) {
-          if (!tradesByPositionId.has(linkId)) tradesByPositionId.set(linkId, [])
-          tradesByPositionId.get(linkId)!.push(trade)
-        }
-      }
-    }
-
     let synced = 0
 
     for (const aPos of positionRecords) {
@@ -118,13 +100,18 @@ async function syncPub(pubCode: string) {
       const rawInvestmentTypes = (pf['Investment Type (from Associated Trades)'] || [])
       const investmentType = classifyInvestmentType(rawInvestmentTypes)
 
+      const tradeRecords = tradesByPositionId.get(aPos.id) || []
+      const posName = pf['Position Name'] || pf['Position Name (INTERNAL)'] || ''
+      const spreadType = detectSpreadType(posName, tradeRecords)
+
       const position = await prisma.position.upsert({
         where: { airtableId: aPos.id },
         update: {
-          name: pf['Position Name'] || pf['Position Name (INTERNAL)'] || '',
+          name: posName,
           symbols: pf['Associated Symbols'] || [],
           status: pf['Open/Closed?'] || 'Open',
           investmentType,
+          spreadType,
           positionReturn: pf['Position Return'] ?? null,
           openDate: pf['Open Date'] ? new Date(pf['Open Date']) : null,
           closeDate: pf['Close Date'] ? new Date(pf['Close Date']) : null,
@@ -133,10 +120,11 @@ async function syncPub(pubCode: string) {
         create: {
           airtableId: aPos.id,
           portfolioId: portfolio.id,
-          name: pf['Position Name'] || pf['Position Name (INTERNAL)'] || '',
+          name: posName,
           symbols: pf['Associated Symbols'] || [],
           status: pf['Open/Closed?'] || 'Open',
           investmentType,
+          spreadType,
           positionReturn: pf['Position Return'] ?? null,
           openDate: pf['Open Date'] ? new Date(pf['Open Date']) : null,
           closeDate: pf['Close Date'] ? new Date(pf['Close Date']) : null,
@@ -144,8 +132,6 @@ async function syncPub(pubCode: string) {
         },
       })
       synced++
-
-      const tradeRecords = tradesByPositionId.get(aPos.id) || []
 
       // Track trade-level types to back-fill position investmentType with full context
       const tradeTypes: string[] = []
@@ -269,8 +255,21 @@ export async function POST(req: NextRequest) {
 
   // Return 202 immediately; sync runs in background after response
   after(async () => {
+    const allTradeRecords = await airtableFetch(TABLES.trades)
+    const tradesByPositionId = new Map<string, any[]>()
+    for (const trade of allTradeRecords) {
+      const parentLinks = trade.fields['Parent Position']
+      const links = Array.isArray(parentLinks) ? parentLinks : []
+      for (const link of links) {
+        const linkId = typeof link === 'object' ? link.id : link
+        if (linkId) {
+          if (!tradesByPositionId.has(linkId)) tradesByPositionId.set(linkId, [])
+          tradesByPositionId.get(linkId)!.push(trade)
+        }
+      }
+    }
     for (const pubCode of codesToSync) {
-      await syncPub(pubCode)
+      await syncPub(pubCode, tradesByPositionId)
     }
   })
 

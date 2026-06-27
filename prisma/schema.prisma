@@ -49,6 +49,7 @@ model Position {
   symbols          String[]
   status           String
   investmentType   String
+  spreadType       String?
   positionReturn   Float?
   openDate         DateTime?
   closeDate        DateTime?

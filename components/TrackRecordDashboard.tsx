@@ -1,7 +1,7 @@
 'use client'
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useRef } from 'react'
 
 const PUB_OPTIONS = [
   { value: 'TPU', label: 'Monument Trend Advisory' },
@@ -32,6 +32,28 @@ const STATUS_OPTIONS = [
   { value: 'closed', label: 'Closed' },
 ]
 
+const SPREAD_OPTIONS = [
+  { value: 'STRANGLE', label: 'Strangle' },
+  { value: 'IRON_CONDOR', label: 'Iron Condor' },
+  { value: 'PUT_CREDIT_SPREAD', label: 'Vertical Credit Spread (Put)' },
+  { value: 'CALL_CREDIT_SPREAD', label: 'Vertical Credit Spread (Call)' },
+  { value: 'PUT_DEBIT_SPREAD', label: 'Vertical Debit Spread (Put)' },
+  { value: 'CALL_DEBIT_SPREAD', label: 'Vertical Debit Spread (Call)' },
+  { value: 'CALENDAR', label: 'Calendar Spread' },
+  { value: 'DIAGONAL', label: 'Diagonal Spread' },
+]
+
+const SPREAD_LABELS: Record<string, string> = {
+  STRANGLE: 'Strangle',
+  IRON_CONDOR: 'Iron Condor',
+  PUT_CREDIT_SPREAD: 'Put Credit Spread',
+  CALL_CREDIT_SPREAD: 'Call Credit Spread',
+  PUT_DEBIT_SPREAD: 'Put Debit Spread',
+  CALL_DEBIT_SPREAD: 'Call Debit Spread',
+  CALENDAR: 'Calendar',
+  DIAGONAL: 'Diagonal',
+}
+
 // positionReturn is stored as a decimal (0.18 = 18%)
 function returnColor(r: number | null | undefined) {
   if (r === null || r === undefined) return 'text-gray-400'
@@ -42,6 +64,79 @@ function returnColor(r: number | null | undefined) {
 function statColor(v: number | null | undefined) {
   if (v === null || v === undefined) return 'text-white'
   return v >= 0 ? 'text-green-400' : 'text-red-400'
+}
+
+function FilterDropdown({
+  label, options, selected, onChange, single
+}: {
+  label: string
+  options: { value: string; label: string }[]
+  selected: string[]
+  onChange: (vals: string[]) => void
+  single?: boolean
+}) {
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    function handler(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [])
+
+  const summary = selected.length === 0
+    ? `All ${label}`
+    : selected.length === 1
+      ? options.find(o => o.value === selected[0])?.label ?? selected[0]
+      : `${selected.length} selected`
+
+  return (
+    <div ref={ref} className="relative">
+      <button
+        onClick={() => setOpen(v => !v)}
+        className="flex items-center gap-2 bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white hover:bg-gray-700 transition-colors min-w-[160px] justify-between"
+      >
+        <span className={selected.length === 0 ? 'text-gray-400' : 'text-white'}>{summary}</span>
+        <svg className={`w-4 h-4 text-gray-400 transition-transform ${open ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+        </svg>
+      </button>
+      {open && (
+        <div className="absolute z-50 top-full left-0 mt-1 bg-gray-800 border border-gray-700 rounded-lg shadow-xl min-w-[200px] py-1">
+          {!single && selected.length > 0 && (
+            <button
+              onClick={() => { onChange([]); setOpen(false) }}
+              className="w-full text-left px-3 py-2 text-xs text-gray-400 hover:bg-gray-700 border-b border-gray-700"
+            >
+              Clear selection
+            </button>
+          )}
+          {options.map(o => {
+            const active = selected.includes(o.value)
+            return (
+              <button
+                key={o.value}
+                onClick={() => {
+                  if (single) { onChange(active ? [] : [o.value]); setOpen(false) }
+                  else onChange(active ? selected.filter(v => v !== o.value) : [...selected, o.value])
+                }}
+                className={`w-full text-left px-3 py-2 text-sm flex items-center gap-2 hover:bg-gray-700 transition-colors ${active ? 'text-white' : 'text-gray-300'}`}
+              >
+                {!single && (
+                  <span className={`w-4 h-4 rounded border flex-shrink-0 flex items-center justify-center ${active ? 'bg-blue-600 border-blue-600' : 'border-gray-500'}`}>
+                    {active && <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" /></svg>}
+                  </span>
+                )}
+                {o.label}
+              </button>
+            )
+          })}
+        </div>
+      )}
+    </div>
+  )
 }
 
 function FilterPill({ label, active, onClick }: { label: string; active: boolean; onClick: () => void }) {
@@ -71,6 +166,7 @@ export default function TrackRecordDashboard() {
   const [pubCodes, setPubCodes] = useState<string[]>([])
   const [gurus, setGurus] = useState<string[]>([])
   const [types, setTypes] = useState<string[]>([])
+  const [spreadTypes, setSpreadTypes] = useState<string[]>([])
   const [status, setStatus] = useState('all')
   const [positions, setPositions] = useState<any[]>([])
   const [stats, setStats] = useState<any>(null)
@@ -84,9 +180,10 @@ export default function TrackRecordDashboard() {
     if (pubCodes.length) p.set('pubCodes', pubCodes.join(','))
     if (gurus.length) p.set('gurus', gurus.join(','))
     if (types.length) p.set('types', types.join(','))
+    if (spreadTypes.length) p.set('spreadTypes', spreadTypes.join(','))
     if (status !== 'all') p.set('status', status)
     return p.toString()
-  }, [pubCodes, gurus, types, status])
+  }, [pubCodes, gurus, types, spreadTypes, status])
 
   useEffect(() => {
     setLoading(true)
@@ -102,7 +199,7 @@ export default function TrackRecordDashboard() {
     }).catch(() => setLoading(false))
   }, [buildParams, page])
 
-  useEffect(() => { setPage(1) }, [pubCodes, gurus, types, status])
+  useEffect(() => { setPage(1) }, [pubCodes, gurus, types, spreadTypes, status])
 
   function toggle(arr: string[], val: string, set: (v: string[]) => void) {
     set(arr.includes(val) ? arr.filter(v => v !== val) : [...arr, val])
@@ -119,42 +216,42 @@ export default function TrackRecordDashboard() {
           <p className="text-gray-400 mt-1">Monument Traders Alliance — Live portfolio performance</p>
         </div>
 
-        <div className="bg-gray-900 border border-gray-800 rounded-xl p-5 mb-6 space-y-4">
-          <div>
-            <div className="text-xs text-gray-500 uppercase tracking-wide mb-2">Publication</div>
-            <div className="flex flex-wrap gap-2">
-              {PUB_OPTIONS.map(o => (
-                <FilterPill key={o.value} label={o.label} active={pubCodes.includes(o.value)}
-                  onClick={() => toggle(pubCodes, o.value, setPubCodes)} />
-              ))}
+        <div className="bg-gray-900 border border-gray-800 rounded-xl p-5 mb-6">
+          <div className="flex flex-wrap gap-3 items-end">
+            <div>
+              <div className="text-xs text-gray-500 uppercase tracking-wide mb-2">Publication</div>
+              <FilterDropdown label="Publications" options={PUB_OPTIONS} selected={pubCodes} onChange={setPubCodes} />
             </div>
-          </div>
-          <div>
-            <div className="text-xs text-gray-500 uppercase tracking-wide mb-2">Guru</div>
-            <div className="flex flex-wrap gap-2">
-              {GURU_OPTIONS.map(o => (
-                <FilterPill key={o.value} label={o.label} active={gurus.includes(o.value)}
-                  onClick={() => toggle(gurus, o.value, setGurus)} />
-              ))}
+            <div>
+              <div className="text-xs text-gray-500 uppercase tracking-wide mb-2">Guru</div>
+              <FilterDropdown label="Gurus" options={GURU_OPTIONS} selected={gurus} onChange={setGurus} />
             </div>
-          </div>
-          <div>
-            <div className="text-xs text-gray-500 uppercase tracking-wide mb-2">Strategy</div>
-            <div className="flex flex-wrap gap-2">
-              {TYPE_OPTIONS.map(o => (
-                <FilterPill key={o.value} label={o.label} active={types.includes(o.value)}
-                  onClick={() => toggle(types, o.value, setTypes)} />
-              ))}
+            <div>
+              <div className="text-xs text-gray-500 uppercase tracking-wide mb-2">Strategy</div>
+              <FilterDropdown label="Strategies" options={TYPE_OPTIONS} selected={types} onChange={setTypes} />
             </div>
-          </div>
-          <div>
-            <div className="text-xs text-gray-500 uppercase tracking-wide mb-2">Status</div>
-            <div className="flex flex-wrap gap-2">
-              {STATUS_OPTIONS.map(o => (
-                <FilterPill key={o.value} label={o.label} active={status === o.value}
-                  onClick={() => setStatus(o.value)} />
-              ))}
+            <div>
+              <div className="text-xs text-gray-500 uppercase tracking-wide mb-2">Spread Type</div>
+              <FilterDropdown label="Spread Types" options={SPREAD_OPTIONS} selected={spreadTypes} onChange={setSpreadTypes} />
             </div>
+            <div>
+              <div className="text-xs text-gray-500 uppercase tracking-wide mb-2">Status</div>
+              <FilterDropdown
+                label="Status"
+                options={[{ value: 'open', label: 'Open' }, { value: 'closed', label: 'Closed' }]}
+                selected={status === 'all' ? [] : [status]}
+                onChange={vals => setStatus(vals.length ? vals[vals.length - 1] : 'all')}
+                single
+              />
+            </div>
+            {(pubCodes.length > 0 || gurus.length > 0 || types.length > 0 || spreadTypes.length > 0 || status !== 'all') && (
+              <button
+                onClick={() => { setPubCodes([]); setGurus([]); setTypes([]); setSpreadTypes([]); setStatus('all') }}
+                className="text-xs text-gray-400 hover:text-white border border-gray-700 rounded-lg px-3 py-2 hover:border-gray-500 transition-colors"
+              >
+                Clear all
+              </button>
+            )}
           </div>
         </div>
 
@@ -293,6 +390,8 @@ export default function TrackRecordDashboard() {
                     <th className="text-left px-4 py-3">Closed</th>
                     <th className="text-right px-4 py-3">Days</th>
                     <th className="text-right px-5 py-3">Return</th>
+                    <th className="text-left px-3 py-3">Spread</th>
+                    <th className="text-left px-3 py-3">Entry</th>
                     <th className="text-center px-4 py-3">Status</th>
                   </tr>
                 </thead>
@@ -336,6 +435,23 @@ export default function TrackRecordDashboard() {
                         {pos.positionReturn !== null
                           ? `${pos.positionReturn * 100 >= 0 ? '+' : ''}${(pos.positionReturn * 100).toFixed(1)}%`
                           : '—'}
+                      </td>
+                      <td className="px-3 py-3">
+                        {pos.spreadType ? (
+                          <span className="text-xs bg-purple-900/40 text-purple-300 border border-purple-800/50 rounded px-2 py-0.5">
+                            {SPREAD_LABELS[pos.spreadType] ?? pos.spreadType}
+                          </span>
+                        ) : null}
+                      </td>
+                      <td className="px-3 py-3 text-sm text-gray-300">
+                        {(() => {
+                          const openTrade = pos.trades?.find((t: any) => t.toOpenOrClose === 'Open' && t.tradePrice)
+                          if (!openTrade) return <span className="text-gray-600">—</span>
+                          const isOption = ['CALL','PUT','PUT_SELL','COVERED_CALL','PUT_CREDIT_SPREAD','CALL_CREDIT_SPREAD','PUT_DEBIT_SPREAD','CALL_DEBIT_SPREAD','STRANGLE','IRON_CONDOR'].includes(pos.investmentType)
+                          const price = openTrade.tradePrice
+                          const costLabel = isOption ? `$${(price * 100).toFixed(2)}/contract` : `$${price.toFixed(2)}/share`
+                          return <span title={`Trade price: $${price}`}>{costLabel}</span>
+                        })()}
                       </td>
                       <td className="px-4 py-3 text-center">
                         <span className={`text-xs px-2 py-0.5 rounded-full ${

@@ -9,6 +9,7 @@ export async function GET(req: NextRequest) {
   const pubCodes = searchParams.get('pubCodes')?.split(',').filter(Boolean) || []
   const gurus = searchParams.get('gurus')?.split(',').filter(Boolean) || []
   const types = searchParams.get('types')?.split(',').filter(Boolean) || []
+  const spreadTypes = searchParams.get('spreadTypes')?.split(',').filter(Boolean) || []
   const status = searchParams.get('status') || 'all'
   const page = parseInt(searchParams.get('page') || '1')
   const limit = parseInt(searchParams.get('limit') || '50')
@@ -35,6 +36,10 @@ export async function GET(req: NextRequest) {
 
   if (types.length > 0) {
     where.investmentType = { in: types }
+  }
+
+  if (spreadTypes.length > 0) {
+    where.spreadType = { in: spreadTypes }
   }
 
   if (status === 'open') where.status = 'Open'
