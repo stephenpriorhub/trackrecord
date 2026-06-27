@@ -22,9 +22,13 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
+  // Allow syncing a single pub to avoid proxy timeouts
+  const singlePub = req.nextUrl.searchParams.get('pubCode')
+  const codesToSync = singlePub ? [singlePub.toUpperCase()] : PUB_CODES
+
   const results: any[] = []
 
-  for (const pubCode of PUB_CODES) {
+  for (const pubCode of codesToSync) {
     const log = await prisma.syncLog.create({
       data: { pubCode, status: 'running' },
     })
