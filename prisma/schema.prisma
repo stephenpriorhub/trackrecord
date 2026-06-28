@@ -12,6 +12,7 @@ model Guru {
   name        String
   slug        String           @unique
   portfolios  PortfolioGuru[]
+  positions   PositionGuru[]
   trades      Trade[]
   createdAt   DateTime         @default(now())
   updatedAt   DateTime         @updatedAt
@@ -41,10 +42,10 @@ model PortfolioGuru {
 }
 
 model Position {
-  id               String     @id @default(cuid())
-  airtableId       String     @unique
+  id               String         @id @default(cuid())
+  airtableId       String         @unique
   portfolioId      String
-  portfolio        Portfolio  @relation(fields: [portfolioId], references: [id])
+  portfolio        Portfolio      @relation(fields: [portfolioId], references: [id])
   name             String
   symbols          String[]
   status           String
@@ -55,11 +56,21 @@ model Position {
   closeDate        DateTime?
   daysHeld         Int?
   parentPositionId String?
-  parentPosition   Position?  @relation("PartialClose", fields: [parentPositionId], references: [id])
-  childPositions   Position[] @relation("PartialClose")
+  parentPosition   Position?      @relation("PartialClose", fields: [parentPositionId], references: [id])
+  childPositions   Position[]     @relation("PartialClose")
   trades           Trade[]
-  createdAt        DateTime   @default(now())
-  updatedAt        DateTime   @updatedAt
+  gurus            PositionGuru[]
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+}
+
+model PositionGuru {
+  position   Position @relation(fields: [positionId], references: [id])
+  positionId String
+  guru       Guru     @relation(fields: [guruId], references: [id])
+  guruId     String
+
+  @@id([positionId, guruId])
 }
 
 model Trade {

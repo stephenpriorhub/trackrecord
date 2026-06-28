@@ -15,12 +15,15 @@ export async function GET(req: NextRequest) {
 
   const portfolioFilter: any = { businessUnit: 'Monument Traders Alliance' }
   if (pubCodes.length > 0) portfolioFilter.pubCode = { in: pubCodes }
-  if (gurus.length > 0) portfolioFilter.gurus = { some: { guru: { slug: { in: gurus } } } }
+  const guruPositionFilter = gurus.length > 0
+    ? { gurus: { some: { guru: { slug: { in: gurus } } } } }
+    : {}
 
   const closedWhere: any = {
     parentPositionId: null,
     status: 'Closed',
     portfolio: portfolioFilter,
+    ...guruPositionFilter,
   }
   if (types.length > 0) closedWhere.investmentType = { in: types }
   if (spreadTypes.length > 0) closedWhere.spreadType = { in: spreadTypes }
@@ -88,6 +91,7 @@ export async function GET(req: NextRequest) {
     parentPositionId: null,
     status: 'Open',
     portfolio: portfolioFilter,
+    ...guruPositionFilter,
   }
   if (types.length > 0) openWhere.investmentType = { in: types }
   if (spreadTypes.length > 0) openWhere.spreadType = { in: spreadTypes }

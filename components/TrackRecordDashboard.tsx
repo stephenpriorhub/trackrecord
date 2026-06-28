@@ -386,9 +386,9 @@ export default function TrackRecordDashboard() {
                             Partial close ({pos.childPositions.length + 1} tranches)
                           </div>
                         )}
-                        {pos.portfolio?.gurus?.length > 0 && (
+                        {pos.gurus?.length > 0 && (
                           <div className="text-xs text-gray-500 mt-0.5">
-                            {pos.portfolio.gurus.map((g: any) => g.guru.name).join(', ')}
+                            {pos.gurus.map((g: any) => g.guru.name).join(', ')}
                           </div>
                         )}
                       </td>
@@ -497,7 +497,9 @@ function DrillDownModal({ position, onClose }: { position: any; onClose: () => v
           <div>
             <h2 className="text-lg sm:text-xl font-bold text-white">{position.name}</h2>
             <div className="text-sm text-gray-400 mt-1">
-              {(position.symbols || []).join(', ')} · {position.portfolio?.pubCode} · {position.investmentType}
+              {(position.symbols || []).join(', ')} · {position.portfolio?.pubCode}
+              {position.gurus?.length > 0 && ` · ${position.gurus.map((g: any) => g.guru.name).join(', ')}`}
+              {' · '}{position.investmentType}
             </div>
           </div>
           <button onClick={onClose} className="text-gray-500 hover:text-white text-2xl leading-none">&times;</button>

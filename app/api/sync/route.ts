@@ -104,6 +104,18 @@ async function syncPub(pubCode: string, tradesByPositionId: Map<string, any[]>) 
       const posName = pf['Position Name'] || pf['Position Name (INTERNAL)'] || ''
       const spreadType = detectSpreadType(posName, tradeRecords)
 
+      // Resolve position-level guru from "Reporting Guru(s)" formula field
+      // This is the authoritative per-position guru attribution (may differ from portfolio default)
+      const rawReportingGurus = pf['Reporting Guru(s)']
+      const reportingGuruNames: string[] = []
+      if (rawReportingGurus) {
+        const arr = Array.isArray(rawReportingGurus) ? rawReportingGurus : [rawReportingGurus]
+        for (const v of arr) {
+          const name = typeof v === 'string' ? v.trim() : (v?.name?.trim() ?? null)
+          if (name) reportingGuruNames.push(name)
+        }
+      }
+
       const position = await prisma.position.upsert({
         where: { airtableId: aPos.id },
         update: {
@@ -131,6 +143,24 @@ async function syncPub(pubCode: string, tradesByPositionId: Map<string, any[]>) 
           daysHeld: pf['Days Held'] ? Math.round(pf['Days Held']) : null,
         },
       })
+
+      // Sync PositionGuru records — prefer Reporting Guru(s), fall back to portfolio gurus
+      await prisma.positionGuru.deleteMany({ where: { positionId: position.id } })
+      if (reportingGuruNames.length > 0) {
+        for (const guruName of reportingGuruNames) {
+          const guruEntry = Object.values(GURU_NAMES).find(g => g.name === guruName)
+          if (!guruEntry) continue
+          const guru = await prisma.guru.findUnique({ where: { slug: guruEntry.slug } })
+          if (!guru) continue
+          await prisma.positionGuru.create({ data: { positionId: position.id, guruId: guru.id } })
+        }
+      } else {
+        // Fall back to portfolio-level gurus
+        for (const guruId of guruDbIds) {
+          await prisma.positionGuru.create({ data: { positionId: position.id, guruId } })
+        }
+      }
+
       synced++
 
       // Track trade-level types to back-fill position investmentType with full context

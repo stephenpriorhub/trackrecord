@@ -26,12 +26,7 @@ export async function GET(req: NextRequest) {
   }
 
   if (gurus.length > 0) {
-    where.portfolio = {
-      ...where.portfolio,
-      gurus: {
-        some: { guru: { slug: { in: gurus } } },
-      },
-    }
+    where.gurus = { some: { guru: { slug: { in: gurus } } } }
   }
 
   if (types.length > 0) {
@@ -51,6 +46,7 @@ export async function GET(req: NextRequest) {
       where,
       include: {
         portfolio: { include: { gurus: { include: { guru: true } } } },
+        gurus: { include: { guru: true } },
         trades: { orderBy: { tradeDate: 'asc' } },
         childPositions: {
           include: { trades: { orderBy: { tradeDate: 'asc' } } },
