@@ -104,17 +104,25 @@ async function syncPub(pubCode: string, tradesByPositionId: Map<string, any[]>) 
       const posName = pf['Position Name'] || pf['Position Name (INTERNAL)'] || ''
       const spreadType = detectSpreadType(posName, tradeRecords)
 
-      // Resolve position-level guru from "Reporting Guru(s)" formula field
-      // This is the authoritative per-position guru attribution (may differ from portfolio default)
+      // Resolve position-level guru from "Reporting Guru(s)" formula field.
+      // The field is a formula that concatenates linked record names, so it may return
+      // "Bryan Bottarelli, Bryan Bottarelli" (comma-joined, possibly duplicated) as one string.
       const rawReportingGurus = pf['Reporting Guru(s)']
-      const reportingGuruNames: string[] = []
+      const reportingGuruNamesRaw: string[] = []
       if (rawReportingGurus) {
         const arr = Array.isArray(rawReportingGurus) ? rawReportingGurus : [rawReportingGurus]
         for (const v of arr) {
-          const name = typeof v === 'string' ? v.trim() : (v?.name?.trim() ?? null)
-          if (name) reportingGuruNames.push(name)
+          const raw = typeof v === 'string' ? v : (v?.name ?? null)
+          if (!raw) continue
+          // Split on comma in case formula joined multiple names into one string
+          for (const part of raw.split(',')) {
+            const name = part.trim()
+            if (name) reportingGuruNamesRaw.push(name)
+          }
         }
       }
+      // Deduplicate
+      const reportingGuruNames = [...new Set(reportingGuruNamesRaw)]
 
       const position = await prisma.position.upsert({
         where: { airtableId: aPos.id },
