@@ -31,11 +31,12 @@ export default async function EmbedPage({
   })
 
   return (
-    <div style={{ padding: '16px', fontSize: '13px', fontFamily: 'system-ui, sans-serif' }}>
+    <div style={{ padding: '12px', fontSize: '13px', fontFamily: 'system-ui, sans-serif', maxWidth: '100%', boxSizing: 'border-box' }}>
       <div style={{ marginBottom: '12px', fontWeight: 700, fontSize: '16px', color: '#fff' }}>
         {pubCode.toUpperCase()} Track Record
       </div>
-      <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+      <div style={{ width: '100%', maxWidth: '100%', overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
+      <table style={{ width: '100%', minWidth: '480px', borderCollapse: 'collapse' }}>
         <thead>
           <tr style={{ borderBottom: '1px solid #374151', color: '#9ca3af', fontSize: '11px', textTransform: 'uppercase' as const }}>
             <th style={{ textAlign: 'left' as const, padding: '6px 8px' }}>Position</th>
@@ -78,6 +79,7 @@ export default async function EmbedPage({
           })}
         </tbody>
       </table>
+      </div>
     </div>
   )
 }

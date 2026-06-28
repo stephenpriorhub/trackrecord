@@ -128,7 +128,7 @@ function FilterDropdown({
     <div ref={ref} className="relative">
       <button
         onClick={() => setOpen(v => !v)}
-        className="flex items-center gap-2 bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white hover:bg-gray-700 transition-colors min-w-[160px] justify-between"
+        className="flex items-center gap-2 bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white hover:bg-gray-700 transition-colors w-full sm:w-auto sm:min-w-[160px] justify-between"
       >
         <span className={selected.length === 0 ? 'text-gray-400' : 'text-white'}>{summary}</span>
         <svg className={`w-4 h-4 text-gray-400 transition-transform ${open ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -241,31 +241,31 @@ export default function TrackRecordDashboard() {
 
   return (
     <div className="min-h-screen bg-gray-950 text-white">
-      <div className="max-w-7xl mx-auto px-4 py-8">
-        <div className="mb-8">
-          <h1 className="text-3xl font-bold text-white">MTA Track Record</h1>
-          <p className="text-gray-400 mt-1">Monument Traders Alliance — Live portfolio performance</p>
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6 sm:py-8">
+        <div className="mb-6 sm:mb-8">
+          <h1 className="text-2xl sm:text-3xl font-bold text-white">MTA Track Record</h1>
+          <p className="text-sm sm:text-base text-gray-400 mt-1">Monument Traders Alliance — Live portfolio performance</p>
         </div>
 
-        <div className="bg-gray-900 border border-gray-800 rounded-xl p-5 mb-6">
+        <div className="bg-gray-900 border border-gray-800 rounded-xl p-4 sm:p-5 mb-6">
           <div className="flex flex-wrap gap-3 items-end">
-            <div>
+            <div className="w-full sm:w-auto">
               <div className="text-xs text-gray-500 uppercase tracking-wide mb-2">Publication</div>
               <FilterDropdown label="Publications" options={PUB_OPTIONS} selected={pubCodes} onChange={setPubCodes} />
             </div>
-            <div>
+            <div className="w-full sm:w-auto">
               <div className="text-xs text-gray-500 uppercase tracking-wide mb-2">Guru</div>
               <FilterDropdown label="Gurus" options={GURU_OPTIONS} selected={gurus} onChange={setGurus} />
             </div>
-            <div>
+            <div className="w-full sm:w-auto">
               <div className="text-xs text-gray-500 uppercase tracking-wide mb-2">Strategy</div>
               <FilterDropdown label="Strategies" options={TYPE_OPTIONS} selected={types} onChange={setTypes} />
             </div>
-            <div>
+            <div className="w-full sm:w-auto">
               <div className="text-xs text-gray-500 uppercase tracking-wide mb-2">Spread Type</div>
               <FilterDropdown label="Spread Types" options={SPREAD_OPTIONS} selected={spreadTypes} onChange={setSpreadTypes} />
             </div>
-            <div>
+            <div className="w-full sm:w-auto">
               <div className="text-xs text-gray-500 uppercase tracking-wide mb-2">Status</div>
               <FilterDropdown
                 label="Status"
@@ -493,9 +493,9 @@ function DrillDownModal({ position, onClose }: { position: any; onClose: () => v
         className="bg-gray-900 border border-gray-700 rounded-2xl max-w-3xl w-full max-h-[85vh] overflow-y-auto"
         onClick={e => e.stopPropagation()}
       >
-        <div className="flex justify-between items-start p-6 border-b border-gray-800">
+        <div className="flex justify-between items-start p-4 sm:p-6 border-b border-gray-800">
           <div>
-            <h2 className="text-xl font-bold text-white">{position.name}</h2>
+            <h2 className="text-lg sm:text-xl font-bold text-white">{position.name}</h2>
             <div className="text-sm text-gray-400 mt-1">
               {(position.symbols || []).join(', ')} · {position.portfolio?.pubCode} · {position.investmentType}
             </div>
@@ -503,7 +503,7 @@ function DrillDownModal({ position, onClose }: { position: any; onClose: () => v
           <button onClick={onClose} className="text-gray-500 hover:text-white text-2xl leading-none">&times;</button>
         </div>
 
-        <div className="p-6 space-y-6">
+        <div className="p-4 sm:p-6 space-y-6">
           {isPartialClose && (
             <div className="bg-yellow-900/20 border border-yellow-800/40 rounded-lg p-3 text-sm text-yellow-400">
               This position has {allTranches.length} tranches (partial closes)
