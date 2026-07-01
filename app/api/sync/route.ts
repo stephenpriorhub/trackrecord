@@ -3,8 +3,25 @@ import { NextRequest, NextResponse } from 'next/server'
 import { after } from 'next/server'
 import { PrismaClient } from '@prisma/client'
 import { airtableFetch, TABLES, classifyInvestmentType, detectSpreadType } from '@/lib/airtable'
+import warRoomOwners from '@/data/warRoomOwners.json'
 
 const prisma = new PrismaClient()
+
+// Verified War Room owner map (Bryan vs Karim) derived from the manually-maintained
+// track-record spreadsheet, keyed by normalized OCC symbol. Used ONLY to resolve War Room
+// positions where Airtable has no per-trade owner — never overrides an Airtable Trade Guru.
+const WAR_ROOM_OWNERS = warRoomOwners as Record<string, string>
+
+// Normalize an Airtable SYMBOL to the same key format used in warRoomOwners.json:
+// options -> "TICKER|YYMMDD|C/P|STRIKE" (strike as integer), otherwise the bare ticker.
+function ownerKeyFromSymbol(symbol: unknown): string | null {
+  if (typeof symbol !== 'string') return null
+  const s = symbol.toUpperCase().replace(/[^A-Z0-9]/g, '')
+  if (!s) return null
+  const m = s.match(/^([A-Z]+)(\d{6})([CP])(\d{6,8})/)
+  if (m) return `${m[1]}|${m[2]}|${m[3]}|${parseInt(m[4], 10)}`
+  return s
+}
 
 // Airtable pub codes: MTA = War Room, PMR = Post Market Profits, TPU = Monument Trend Advisory
 const PUB_CODES = ['TPU', 'MTA', 'PMR']
@@ -19,7 +36,13 @@ const GURU_NAMES: Record<string, { slug: string; name: string }> = {
   'Bryan Bottarelli': { slug: 'bryan', name: 'Bryan Bottarelli' },
   'Karim Rahemtulla': { slug: 'karim', name: 'Karim Rahemtulla' },
   'Nate Bear': { slug: 'nate', name: 'Nate Bear' },
+  'George': { slug: 'george', name: 'George' },
 }
+
+// War Room is single-owner per position: Bryan and Karim never co-trade (the Trade Guru
+// field has zero Bryan/Karim overlap). MTA/PMR resolve to exactly one guru from Trade Guru;
+// Trend Advisory (TPU) is co-managed, so a blank position falls back to both editors.
+const SINGLE_OWNER_PUBS = new Set(['MTA', 'PMR'])
 
 // Airtable's "Reporting Guru(s)" field (and the underlying editor fields) are wildly
 // inconsistent across the three services: initials ('B', 'K'), first names ('Bryan'),
@@ -29,18 +52,12 @@ const GURU_ALIASES: Record<string, string> = {
   b: 'bryan', bryan: 'bryan', 'bryan bottarelli': 'bryan', bottarelli: 'bryan',
   k: 'karim', karim: 'karim', 'karim rahemtulla': 'karim', rahemtulla: 'karim',
   n: 'nate', nate: 'nate', 'nate bear': 'nate', bear: 'nate',
+  george: 'george', // War Room analyst tracked as his own guru (distinct from "Neil George")
 }
-
-// Editors/assistants who appear in the guru field but are NOT tracked traders. They are
-// dropped during resolution — a position whose only value is ignored falls back to the
-// portfolio's real gurus, and mixed values (e.g. "Bryan Bottarelli, George") keep the real one.
-const GURU_IGNORE = new Set(['george'])
 
 function resolveGuruSlug(raw: unknown): string | null {
   if (typeof raw !== 'string') return null
-  const key = raw.trim().toLowerCase()
-  if (GURU_IGNORE.has(key)) return null
-  return GURU_ALIASES[key] || null
+  return GURU_ALIASES[raw.trim().toLowerCase()] || null
 }
 
 // Run an async mapper over items with a bounded number of concurrent workers.
@@ -211,14 +228,53 @@ async function syncPub(pubCode: string) {
         create: { airtableId: aPos.id, portfolioId: portfolio.id, ...positionData },
       })
 
-      // Sync PositionGuru records — prefer Reporting Guru(s), fall back to portfolio gurus.
-      // Resolve every raw name through the alias map so 'B'/'Bryan'/'Bryan Bottarelli' all
-      // collapse to one guru. Crucially, if a Reporting Guru value is present but resolves to
-      // nothing (blank, typo, or a stray number), we STILL fall back to portfolio gurus — the
-      // old code skipped the fallback whenever any value existed, leaving positions guru-less.
-      const resolvedSlugs = reportingGuruSlugs(pf['Reporting Guru(s)'])
-      const linkGuruIds = resolvedSlugs.map(s => guruIdBySlug[s]).filter(Boolean)
-      const finalGuruIds = linkGuruIds.length > 0 ? linkGuruIds : guruDbIds
+      // Attribute the position's guru(s).
+      // Single-owner pubs (War Room, Post-Market Profits): use the per-trade Trade Guru field —
+      // the authoritative owner, with zero Bryan/Karim overlap. Pick the guru on the most trades
+      // (ties break to the earliest/opening trade). If no trade records an owner, default to the
+      // pub's primary editor rather than assigning both — the old position-level "Reporting
+      // Guru(s)" formula falsely reported "Bryan, Karim" for these no-owner positions.
+      // Co-managed pubs (Trend Advisory): resolve Reporting Guru(s); a blank falls back to both.
+      let finalGuruIds: string[]
+      if (SINGLE_OWNER_PUBS.has(pubCode)) {
+        const counts = new Map<string, number>()
+        const firstDate = new Map<string, number>()
+        for (const aTrade of posTradeRecords) {
+          const tg = aTrade.fields['Trade Guru']
+          const links = Array.isArray(tg) ? tg : (tg ? [tg] : [])
+          const td = aTrade.fields['Trade Date'] ? Date.parse(aTrade.fields['Trade Date']) : Number.MAX_SAFE_INTEGER
+          const seen = new Set<string>()
+          for (const link of links) {
+            const slug = resolveGuruSlug(typeof link === 'string' ? link : link?.name)
+            if (!slug || seen.has(slug)) continue
+            seen.add(slug)
+            counts.set(slug, (counts.get(slug) || 0) + 1)
+            if (!firstDate.has(slug) || td < firstDate.get(slug)!) firstDate.set(slug, td)
+          }
+        }
+        const owners = [...counts.keys()]
+        owners.sort((a, b) => (counts.get(b)! - counts.get(a)!) || (firstDate.get(a)! - firstDate.get(b)!))
+        let ownerSlug: string
+        if (owners.length > 0) {
+          ownerSlug = owners[0]
+        } else if (pubCode === 'MTA') {
+          // No per-trade owner in Airtable — resolve from the verified War Room spreadsheet
+          // by trade symbol; fall back to Bryan (primary editor) if not listed there.
+          ownerSlug = 'bryan'
+          for (const aTrade of posTradeRecords) {
+            const key = ownerKeyFromSymbol(aTrade.fields['SYMBOL'])
+            const o = key ? WAR_ROOM_OWNERS[key] : undefined
+            if (o) { ownerSlug = o; break }
+          }
+        } else {
+          ownerSlug = 'bryan' // Post-Market Profits is Bryan-only
+        }
+        finalGuruIds = [guruIdBySlug[ownerSlug]].filter(Boolean)
+      } else {
+        const resolvedSlugs = reportingGuruSlugs(pf['Reporting Guru(s)'])
+        const linkGuruIds = resolvedSlugs.map(s => guruIdBySlug[s]).filter(Boolean)
+        finalGuruIds = linkGuruIds.length > 0 ? linkGuruIds : guruDbIds
+      }
 
       await prisma.positionGuru.deleteMany({ where: { positionId: position.id } })
       for (const guruId of finalGuruIds) {
