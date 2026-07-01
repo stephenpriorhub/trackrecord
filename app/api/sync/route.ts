@@ -15,6 +15,21 @@ const GURU_NAMES: Record<string, { slug: string; name: string }> = {
   'Nate Bear': { slug: 'nate', name: 'Nate Bear' },
 }
 
+// Airtable's "Reporting Guru(s)" field (and the underlying editor fields) are wildly
+// inconsistent across the three services: initials ('B', 'K'), first names ('Bryan'),
+// full names ('Bryan Bottarelli'), plus stray casing/whitespace ('b', 'B '). Map any of
+// those to a canonical slug so identical editors don't fragment into separate gurus.
+const GURU_ALIASES: Record<string, string> = {
+  b: 'bryan', bryan: 'bryan', 'bryan bottarelli': 'bryan', bottarelli: 'bryan',
+  k: 'karim', karim: 'karim', 'karim rahemtulla': 'karim', rahemtulla: 'karim',
+  n: 'nate', nate: 'nate', 'nate bear': 'nate', bear: 'nate',
+}
+
+function resolveGuruSlug(raw: unknown): string | null {
+  if (typeof raw !== 'string') return null
+  return GURU_ALIASES[raw.trim().toLowerCase()] || null
+}
+
 async function syncPub(pubCode: string, tradesByPositionId: Map<string, any[]>) {
   const log = await prisma.syncLog.create({
     data: { pubCode, status: 'running' },
@@ -36,10 +51,13 @@ async function syncPub(pubCode: string, tradesByPositionId: Map<string, any[]>) 
     const aPortfolio = portfolioRecords[0]
     const fields = aPortfolio.fields
 
+    // Portfolio-level guru fallback, used when a position has no resolvable "Reporting Guru(s)".
+    // Source of truth: brain vault publication descriptions (Resources/MTA Publication Descriptions.md).
+    // Note: this base's Pub Code "PMR" = editorial code "PMK" = Post-Market Profits, a Bryan-only service.
     const pubGuruMap: Record<string, string[]> = {
-      TPU: ['bryan', 'karim'],
-      MTA: ['bryan', 'karim'],
-      PMR: ['karim'],
+      TPU: ['bryan', 'karim'], // Monument Trend Advisory — Karim & Bryan
+      MTA: ['bryan', 'karim'], // The War Room — Bryan & Karim
+      PMR: ['bryan'],          // Post-Market Profits — Bryan Bottarelli only
     }
 
     const guruDbIds: string[] = []
@@ -152,17 +170,34 @@ async function syncPub(pubCode: string, tradesByPositionId: Map<string, any[]>) 
         },
       })
 
-      // Sync PositionGuru records — prefer Reporting Guru(s), fall back to portfolio gurus
+      // Sync PositionGuru records — prefer Reporting Guru(s), fall back to portfolio gurus.
+      // Resolve every raw name through the alias map so 'B'/'Bryan'/'Bryan Bottarelli' all
+      // collapse to one guru. Crucially, if a Reporting Guru value is present but resolves to
+      // nothing (blank, typo, or a stray number), we STILL fall back to portfolio gurus — the
+      // old code skipped the fallback whenever any value existed, leaving positions guru-less.
       await prisma.positionGuru.deleteMany({ where: { positionId: position.id } })
-      if (reportingGuruNames.length > 0) {
-        for (const guruName of reportingGuruNames) {
-          const guruEntry = Object.values(GURU_NAMES).find(g => g.name === guruName)
-          if (!guruEntry) continue
-          const guru = await prisma.guru.findUnique({ where: { slug: guruEntry.slug } })
-          if (!guru) continue
-          await prisma.positionGuru.create({ data: { positionId: position.id, guruId: guru.id } })
-        }
-      } else {
+
+      const resolvedSlugs = new Set<string>()
+      for (const guruName of reportingGuruNames) {
+        const slug = resolveGuruSlug(guruName)
+        if (slug) resolvedSlugs.add(slug)
+      }
+
+      let gurusLinked = 0
+      for (const slug of resolvedSlugs) {
+        const guruInfo = Object.values(GURU_NAMES).find(g => g.slug === slug)
+        if (!guruInfo) continue
+        // Ensure the guru row exists even if this pub's portfolio didn't seed it
+        const guru = await prisma.guru.upsert({
+          where: { slug },
+          update: { name: guruInfo.name },
+          create: { name: guruInfo.name, slug },
+        })
+        await prisma.positionGuru.create({ data: { positionId: position.id, guruId: guru.id } })
+        gurusLinked++
+      }
+
+      if (gurusLinked === 0) {
         // Fall back to portfolio-level gurus
         for (const guruId of guruDbIds) {
           await prisma.positionGuru.create({ data: { positionId: position.id, guruId } })

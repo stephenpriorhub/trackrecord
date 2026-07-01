@@ -200,6 +200,11 @@ export default function TrackRecordDashboard() {
   const [types, setTypes] = useState<string[]>([])
   const [spreadTypes, setSpreadTypes] = useState<string[]>([])
   const [status, setStatus] = useState('all')
+  const [openStart, setOpenStart] = useState('')
+  const [openEnd, setOpenEnd] = useState('')
+  const [closeStart, setCloseStart] = useState('')
+  const [closeEnd, setCloseEnd] = useState('')
+  const [minReturn, setMinReturn] = useState('')
   const [positions, setPositions] = useState<any[]>([])
   const [stats, setStats] = useState<any>(null)
   const [total, setTotal] = useState(0)
@@ -214,8 +219,13 @@ export default function TrackRecordDashboard() {
     if (types.length) p.set('types', types.join(','))
     if (spreadTypes.length) p.set('spreadTypes', spreadTypes.join(','))
     if (status !== 'all') p.set('status', status)
+    if (openStart) p.set('openStart', openStart)
+    if (openEnd) p.set('openEnd', openEnd)
+    if (closeStart) p.set('closeStart', closeStart)
+    if (closeEnd) p.set('closeEnd', closeEnd)
+    if (minReturn) p.set('minReturn', minReturn)
     return p.toString()
-  }, [pubCodes, gurus, types, spreadTypes, status])
+  }, [pubCodes, gurus, types, spreadTypes, status, openStart, openEnd, closeStart, closeEnd, minReturn])
 
   useEffect(() => {
     setLoading(true)
@@ -231,7 +241,7 @@ export default function TrackRecordDashboard() {
     }).catch(() => setLoading(false))
   }, [buildParams, page])
 
-  useEffect(() => { setPage(1) }, [pubCodes, gurus, types, spreadTypes, status])
+  useEffect(() => { setPage(1) }, [pubCodes, gurus, types, spreadTypes, status, openStart, openEnd, closeStart, closeEnd, minReturn])
 
   function toggle(arr: string[], val: string, set: (v: string[]) => void) {
     set(arr.includes(val) ? arr.filter(v => v !== val) : [...arr, val])
@@ -275,9 +285,56 @@ export default function TrackRecordDashboard() {
                 single
               />
             </div>
-            {(pubCodes.length > 0 || gurus.length > 0 || types.length > 0 || spreadTypes.length > 0 || status !== 'all') && (
+            <div className="w-full sm:w-auto">
+              <div className="text-xs text-gray-500 uppercase tracking-wide mb-2">Opened Date</div>
+              <div className="flex items-center gap-1">
+                <input
+                  type="date"
+                  value={openStart}
+                  onChange={e => setOpenStart(e.target.value)}
+                  className="bg-gray-800 border border-gray-700 rounded-lg px-2 py-2 text-sm text-white [color-scheme:dark]"
+                />
+                <span className="text-gray-500 text-xs">to</span>
+                <input
+                  type="date"
+                  value={openEnd}
+                  onChange={e => setOpenEnd(e.target.value)}
+                  className="bg-gray-800 border border-gray-700 rounded-lg px-2 py-2 text-sm text-white [color-scheme:dark]"
+                />
+              </div>
+            </div>
+            <div className="w-full sm:w-auto">
+              <div className="text-xs text-gray-500 uppercase tracking-wide mb-2">Closed Date</div>
+              <div className="flex items-center gap-1">
+                <input
+                  type="date"
+                  value={closeStart}
+                  onChange={e => setCloseStart(e.target.value)}
+                  className="bg-gray-800 border border-gray-700 rounded-lg px-2 py-2 text-sm text-white [color-scheme:dark]"
+                />
+                <span className="text-gray-500 text-xs">to</span>
+                <input
+                  type="date"
+                  value={closeEnd}
+                  onChange={e => setCloseEnd(e.target.value)}
+                  className="bg-gray-800 border border-gray-700 rounded-lg px-2 py-2 text-sm text-white [color-scheme:dark]"
+                />
+              </div>
+            </div>
+            <div className="w-full sm:w-auto">
+              <div className="text-xs text-gray-500 uppercase tracking-wide mb-2">Gain % over</div>
+              <input
+                type="number"
+                inputMode="decimal"
+                value={minReturn}
+                onChange={e => setMinReturn(e.target.value)}
+                placeholder="e.g. 25"
+                className="bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white w-full sm:w-[110px] placeholder-gray-500"
+              />
+            </div>
+            {(pubCodes.length > 0 || gurus.length > 0 || types.length > 0 || spreadTypes.length > 0 || status !== 'all' || openStart || openEnd || closeStart || closeEnd || minReturn) && (
               <button
-                onClick={() => { setPubCodes([]); setGurus([]); setTypes([]); setSpreadTypes([]); setStatus('all') }}
+                onClick={() => { setPubCodes([]); setGurus([]); setTypes([]); setSpreadTypes([]); setStatus('all'); setOpenStart(''); setOpenEnd(''); setCloseStart(''); setCloseEnd(''); setMinReturn('') }}
                 className="text-xs text-gray-400 hover:text-white border border-gray-700 rounded-lg px-3 py-2 hover:border-gray-500 transition-colors"
               >
                 Clear all
