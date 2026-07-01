@@ -12,12 +12,36 @@ export async function GET(req: NextRequest) {
   const types = searchParams.get('types')?.split(',').filter(Boolean) || []
   const spreadTypes = searchParams.get('spreadTypes')?.split(',').filter(Boolean) || []
   const statusFilter = searchParams.get('status') || 'all'
+  const openStart = searchParams.get('openStart')
+  const openEnd = searchParams.get('openEnd')
+  const closeStart = searchParams.get('closeStart')
+  const closeEnd = searchParams.get('closeEnd')
+  const minReturn = searchParams.get('minReturn')
 
   const portfolioFilter: any = { businessUnit: 'Monument Traders Alliance' }
   if (pubCodes.length > 0) portfolioFilter.pubCode = { in: pubCodes }
   const guruPositionFilter = gurus.length > 0
     ? { gurus: { some: { guru: { slug: { in: gurus } } } } }
     : {}
+
+  // Date-range + gain filters, applied identically to positions API so the summary
+  // matches the visible table. Dates are treated as UTC to match stored values.
+  const openDateFilter: any = {}
+  if (openStart) openDateFilter.gte = new Date(`${openStart}T00:00:00.000Z`)
+  if (openEnd) openDateFilter.lte = new Date(`${openEnd}T23:59:59.999Z`)
+  const closeDateFilter: any = {}
+  if (closeStart) closeDateFilter.gte = new Date(`${closeStart}T00:00:00.000Z`)
+  if (closeEnd) closeDateFilter.lte = new Date(`${closeEnd}T23:59:59.999Z`)
+  const minReturnNum = minReturn !== null && minReturn !== '' ? parseFloat(minReturn) : NaN
+  const hasOpenRange = Object.keys(openDateFilter).length > 0
+  const hasCloseRange = Object.keys(closeDateFilter).length > 0
+  const hasMinReturn = !Number.isNaN(minReturnNum)
+
+  function applyExtraFilters(w: any) {
+    if (hasOpenRange) w.openDate = openDateFilter
+    if (hasCloseRange) w.closeDate = closeDateFilter
+    if (hasMinReturn) w.positionReturn = { gte: minReturnNum / 100 }
+  }
 
   const closedWhere: any = {
     parentPositionId: null,
@@ -27,6 +51,7 @@ export async function GET(req: NextRequest) {
   }
   if (types.length > 0) closedWhere.investmentType = { in: types }
   if (spreadTypes.length > 0) closedWhere.spreadType = { in: spreadTypes }
+  applyExtraFilters(closedWhere)
 
   // Fetch all closed positions including their trades (for weighted avg calculation)
   const closed = await prisma.position.findMany({
@@ -95,6 +120,7 @@ export async function GET(req: NextRequest) {
   }
   if (types.length > 0) openWhere.investmentType = { in: types }
   if (spreadTypes.length > 0) openWhere.spreadType = { in: spreadTypes }
+  applyExtraFilters(openWhere)
   const openCount = await prisma.position.count({ where: openWhere })
 
   // When filtering to open-only, closed stats are not relevant

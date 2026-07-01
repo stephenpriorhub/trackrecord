@@ -1,0 +1,49 @@
+name: Daily Airtable Sync
+
+# Keeps the track record fresh by POSTing the deployed /api/sync endpoint on a schedule.
+# This scheduler lives in GitHub, NOT Railway — it calls the already-running app, so it
+# never needs a redeploy to work and won't break when Railway redeploys.
+#
+# One-time setup (Repo → Settings → Secrets and variables → Actions):
+#   - Secret   SYNC_API_KEY  = the same value as the app's SYNC_API_KEY env var on Railway
+#   - Variable APP_URL       = the deployed base URL (e.g. https://trackrecord.oxfordhub.app)
+#                              If unset, it falls back to the default guess below.
+
+on:
+  schedule:
+    # Times are UTC. Runs pre-market, midday, and post-close ET so data stays current
+    # even if GitHub delays one run (scheduled crons are best-effort, not exact).
+    - cron: '0 12,17,22 * * *'
+  workflow_dispatch: {}   # allows manual "Run workflow" from the Actions tab
+
+concurrency:
+  group: airtable-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger sync
+        env:
+          SYNC_API_KEY: ${{ secrets.SYNC_API_KEY }}
+          APP_URL: ${{ vars.APP_URL }}
+        run: |
+          set -euo pipefail
+          BASE_URL="${APP_URL:-https://trackrecord.oxfordhub.app}"
+          if [ -z "${SYNC_API_KEY}" ]; then
+            echo "::error::SYNC_API_KEY secret is not set. Add it under Settings → Secrets and variables → Actions."
+            exit 1
+          fi
+          echo "Triggering sync at ${BASE_URL}/api/sync"
+          # The endpoint returns 202 immediately and runs the sync in the background.
+          HTTP_CODE=$(curl -sS -o /tmp/sync_resp.txt -w "%{http_code}" \
+            -X POST "${BASE_URL}/api/sync" \
+            -H "x-sync-key: ${SYNC_API_KEY}" \
+            --max-time 60)
+          echo "Response (${HTTP_CODE}): $(cat /tmp/sync_resp.txt)"
+          if [ "${HTTP_CODE}" != "202" ] && [ "${HTTP_CODE}" != "200" ]; then
+            echo "::error::Sync trigger failed with HTTP ${HTTP_CODE}"
+            exit 1
+          fi
+          echo "Sync accepted."
