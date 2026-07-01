@@ -3,8 +3,25 @@ import { NextRequest, NextResponse } from 'next/server'
 import { after } from 'next/server'
 import { PrismaClient } from '@prisma/client'
 import { airtableFetch, TABLES, classifyInvestmentType, detectSpreadType } from '@/lib/airtable'
+import warRoomOwners from '@/data/warRoomOwners.json'
 
 const prisma = new PrismaClient()
+
+// Verified War Room owner map (Bryan vs Karim) derived from the manually-maintained
+// track-record spreadsheet, keyed by normalized OCC symbol. Used ONLY to resolve War Room
+// positions where Airtable has no per-trade owner — never overrides an Airtable Trade Guru.
+const WAR_ROOM_OWNERS = warRoomOwners as Record<string, string>
+
+// Normalize an Airtable SYMBOL to the same key format used in warRoomOwners.json:
+// options -> "TICKER|YYMMDD|C/P|STRIKE" (strike as integer), otherwise the bare ticker.
+function ownerKeyFromSymbol(symbol: unknown): string | null {
+  if (typeof symbol !== 'string') return null
+  const s = symbol.toUpperCase().replace(/[^A-Z0-9]/g, '')
+  if (!s) return null
+  const m = s.match(/^([A-Z]+)(\d{6})([CP])(\d{6,8})/)
+  if (m) return `${m[1]}|${m[2]}|${m[3]}|${parseInt(m[4], 10)}`
+  return s
+}
 
 // Airtable pub codes: MTA = War Room, PMR = Post Market Profits, TPU = Monument Trend Advisory
 const PUB_CODES = ['TPU', 'MTA', 'PMR']
@@ -237,8 +254,21 @@ async function syncPub(pubCode: string) {
         }
         const owners = [...counts.keys()]
         owners.sort((a, b) => (counts.get(b)! - counts.get(a)!) || (firstDate.get(a)! - firstDate.get(b)!))
-        // War Room and Post-Market Profits are both Bryan-primary services.
-        const ownerSlug = owners[0] || 'bryan'
+        let ownerSlug: string
+        if (owners.length > 0) {
+          ownerSlug = owners[0]
+        } else if (pubCode === 'MTA') {
+          // No per-trade owner in Airtable — resolve from the verified War Room spreadsheet
+          // by trade symbol; fall back to Bryan (primary editor) if not listed there.
+          ownerSlug = 'bryan'
+          for (const aTrade of posTradeRecords) {
+            const key = ownerKeyFromSymbol(aTrade.fields['SYMBOL'])
+            const o = key ? WAR_ROOM_OWNERS[key] : undefined
+            if (o) { ownerSlug = o; break }
+          }
+        } else {
+          ownerSlug = 'bryan' // Post-Market Profits is Bryan-only
+        }
         finalGuruIds = [guruIdBySlug[ownerSlug]].filter(Boolean)
       } else {
         const resolvedSlugs = reportingGuruSlugs(pf['Reporting Guru(s)'])
