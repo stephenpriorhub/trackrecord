@@ -31,9 +31,16 @@ const GURU_ALIASES: Record<string, string> = {
   n: 'nate', nate: 'nate', 'nate bear': 'nate', bear: 'nate',
 }
 
+// Editors/assistants who appear in the guru field but are NOT tracked traders. They are
+// dropped during resolution — a position whose only value is ignored falls back to the
+// portfolio's real gurus, and mixed values (e.g. "Bryan Bottarelli, George") keep the real one.
+const GURU_IGNORE = new Set(['george'])
+
 function resolveGuruSlug(raw: unknown): string | null {
   if (typeof raw !== 'string') return null
-  return GURU_ALIASES[raw.trim().toLowerCase()] || null
+  const key = raw.trim().toLowerCase()
+  if (GURU_IGNORE.has(key)) return null
+  return GURU_ALIASES[key] || null
 }
 
 // Run an async mapper over items with a bounded number of concurrent workers.
