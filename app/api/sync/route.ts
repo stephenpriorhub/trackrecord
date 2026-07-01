@@ -6,8 +6,14 @@ import { airtableFetch, TABLES, classifyInvestmentType, detectSpreadType } from 
 
 const prisma = new PrismaClient()
 
-// Airtable pub codes: MTA = War Room, PMR = Post Market Profits
+// Airtable pub codes: MTA = War Room, PMR = Post Market Profits, TPU = Monument Trend Advisory
 const PUB_CODES = ['TPU', 'MTA', 'PMR']
+
+// How many positions to process against Postgres at once. The heavy work is DB writes,
+// so a modest concurrency turns a ~10k-record sequential crawl into a job that finishes
+// in the background window Railway allows. Kept conservative to avoid exhausting the
+// Prisma connection pool.
+const POSITION_CONCURRENCY = 8
 
 const GURU_NAMES: Record<string, { slug: string; name: string }> = {
   'Bryan Bottarelli': { slug: 'bryan', name: 'Bryan Bottarelli' },
@@ -30,12 +36,63 @@ function resolveGuruSlug(raw: unknown): string | null {
   return GURU_ALIASES[raw.trim().toLowerCase()] || null
 }
 
-async function syncPub(pubCode: string, tradesByPositionId: Map<string, any[]>) {
+// Run an async mapper over items with a bounded number of concurrent workers.
+async function mapLimit<T, R>(items: T[], limit: number, fn: (item: T, index: number) => Promise<R>): Promise<R[]> {
+  const results: R[] = new Array(items.length)
+  let cursor = 0
+  async function worker() {
+    while (true) {
+      const i = cursor++
+      if (i >= items.length) return
+      results[i] = await fn(items[i], i)
+    }
+  }
+  const workers = Array.from({ length: Math.min(limit, items.length) }, () => worker())
+  await Promise.all(workers)
+  return results
+}
+
+// Ensure all known gurus exist once, up front, and return a slug -> db id map.
+// Seeding before the concurrent position phase avoids racing upserts on the same slug.
+async function ensureGurus(): Promise<Record<string, string>> {
+  const map: Record<string, string> = {}
+  for (const info of Object.values(GURU_NAMES)) {
+    const guru = await prisma.guru.upsert({
+      where: { slug: info.slug },
+      update: { name: info.name },
+      create: { name: info.name, slug: info.slug },
+    })
+    map[info.slug] = guru.id
+  }
+  return map
+}
+
+// Extract the normalized guru slugs from a position's "Reporting Guru(s)" formula value.
+// The field concatenates linked record names, so it may return
+// "Bryan Bottarelli, Bryan Bottarelli" (comma-joined, possibly duplicated) as one string.
+function reportingGuruSlugs(rawReportingGurus: any): string[] {
+  const slugs = new Set<string>()
+  if (!rawReportingGurus) return []
+  const arr = Array.isArray(rawReportingGurus) ? rawReportingGurus : [rawReportingGurus]
+  for (const v of arr) {
+    const raw = typeof v === 'string' ? v : (v?.name ?? null)
+    if (!raw) continue
+    for (const part of String(raw).split(',')) {
+      const slug = resolveGuruSlug(part)
+      if (slug) slugs.add(slug)
+    }
+  }
+  return [...slugs]
+}
+
+async function syncPub(pubCode: string) {
   const log = await prisma.syncLog.create({
     data: { pubCode, status: 'running' },
   })
 
   try {
+    const guruIdBySlug = await ensureGurus()
+
     const portfolioRecords = await airtableFetch(TABLES.portfolios, {
       filterByFormula: `{Pub Code} = "${pubCode}"`,
     })
@@ -60,17 +117,9 @@ async function syncPub(pubCode: string, tradesByPositionId: Map<string, any[]>) 
       PMR: ['bryan'],          // Post-Market Profits — Bryan Bottarelli only
     }
 
-    const guruDbIds: string[] = []
-    for (const slug of (pubGuruMap[pubCode] || [])) {
-      const guruInfo = Object.values(GURU_NAMES).find(g => g.slug === slug)
-      if (!guruInfo) continue
-      const guru = await prisma.guru.upsert({
-        where: { slug },
-        update: { name: guruInfo.name },
-        create: { name: guruInfo.name, slug },
-      })
-      guruDbIds.push(guru.id)
-    }
+    const guruDbIds = (pubGuruMap[pubCode] || [])
+      .map(slug => guruIdBySlug[slug])
+      .filter(Boolean)
 
     const portfolio = await prisma.portfolio.upsert({
       where: { airtableId: aPortfolio.id },
@@ -111,63 +160,48 @@ async function syncPub(pubCode: string, tradesByPositionId: Map<string, any[]>) 
       filterByFormula: `FIND("${portfolioName}", ARRAYJOIN({Portfolio Name (from Portfolio)}))`,
     })
 
-    let synced = 0
-
-    for (const aPos of positionRecords) {
-      const pf = aPos.fields
-      const rawInvestmentTypes = (pf['Investment Type (from Associated Trades)'] || [])
-      const investmentType = classifyInvestmentType(rawInvestmentTypes)
-
-      const tradeRecords = tradesByPositionId.get(aPos.id) || []
-      const posName = pf['Position Name'] || pf['Position Name (INTERNAL)'] || ''
-      const spreadType = detectSpreadType(posName, tradeRecords)
-
-      // Resolve position-level guru from "Reporting Guru(s)" formula field.
-      // The field is a formula that concatenates linked record names, so it may return
-      // "Bryan Bottarelli, Bryan Bottarelli" (comma-joined, possibly duplicated) as one string.
-      const rawReportingGurus = pf['Reporting Guru(s)']
-      const reportingGuruNamesRaw: string[] = []
-      if (rawReportingGurus) {
-        const arr = Array.isArray(rawReportingGurus) ? rawReportingGurus : [rawReportingGurus]
-        for (const v of arr) {
-          const raw = typeof v === 'string' ? v : (v?.name ?? null)
-          if (!raw) continue
-          // Split on comma in case formula joined multiple names into one string
-          for (const part of raw.split(',')) {
-            const name = part.trim()
-            if (name) reportingGuruNamesRaw.push(name)
-          }
+    // Fetch ONLY this publication's trades, not the entire ~90k-row trades table. The old
+    // code pulled every trade across all 13 publications on every run, which never finished.
+    const tradeRecords = await airtableFetch(TABLES.trades, {
+      filterByFormula: `FIND("${portfolioName}", ARRAYJOIN({Portfolio (from Parent Position)}))`,
+    })
+    const tradesByPositionId = new Map<string, any[]>()
+    for (const trade of tradeRecords) {
+      const parentLinks = trade.fields['Parent Position']
+      const links = Array.isArray(parentLinks) ? parentLinks : []
+      for (const link of links) {
+        const linkId = typeof link === 'object' ? link.id : link
+        if (linkId) {
+          if (!tradesByPositionId.has(linkId)) tradesByPositionId.set(linkId, [])
+          tradesByPositionId.get(linkId)!.push(trade)
         }
       }
-      // Deduplicate
-      const reportingGuruNames = [...new Set(reportingGuruNamesRaw)]
+    }
+
+    async function syncPosition(aPos: any) {
+      const pf = aPos.fields
+      const investmentType = classifyInvestmentType(pf['Investment Type (from Associated Trades)'] || [])
+
+      const posTradeRecords = tradesByPositionId.get(aPos.id) || []
+      const posName = pf['Position Name'] || pf['Position Name (INTERNAL)'] || ''
+      const spreadType = detectSpreadType(posName, posTradeRecords)
+
+      const positionData = {
+        name: posName,
+        symbols: pf['Associated Symbols'] || [],
+        status: pf['Open/Closed?'] || 'Open',
+        investmentType,
+        spreadType,
+        positionReturn: pf['Position Return'] ?? null,
+        openDate: pf['Open Date'] ? new Date(pf['Open Date']) : null,
+        closeDate: pf['Close Date'] ? new Date(pf['Close Date']) : null,
+        daysHeld: pf['Days Held'] ? Math.round(pf['Days Held']) : null,
+      }
 
       const position = await prisma.position.upsert({
         where: { airtableId: aPos.id },
-        update: {
-          name: posName,
-          symbols: pf['Associated Symbols'] || [],
-          status: pf['Open/Closed?'] || 'Open',
-          investmentType,
-          spreadType,
-          positionReturn: pf['Position Return'] ?? null,
-          openDate: pf['Open Date'] ? new Date(pf['Open Date']) : null,
-          closeDate: pf['Close Date'] ? new Date(pf['Close Date']) : null,
-          daysHeld: pf['Days Held'] ? Math.round(pf['Days Held']) : null,
-        },
-        create: {
-          airtableId: aPos.id,
-          portfolioId: portfolio.id,
-          name: posName,
-          symbols: pf['Associated Symbols'] || [],
-          status: pf['Open/Closed?'] || 'Open',
-          investmentType,
-          spreadType,
-          positionReturn: pf['Position Return'] ?? null,
-          openDate: pf['Open Date'] ? new Date(pf['Open Date']) : null,
-          closeDate: pf['Close Date'] ? new Date(pf['Close Date']) : null,
-          daysHeld: pf['Days Held'] ? Math.round(pf['Days Held']) : null,
-        },
+        update: positionData,
+        create: { airtableId: aPos.id, portfolioId: portfolio.id, ...positionData },
       })
 
       // Sync PositionGuru records — prefer Reporting Guru(s), fall back to portfolio gurus.
@@ -175,41 +209,18 @@ async function syncPub(pubCode: string, tradesByPositionId: Map<string, any[]>) 
       // collapse to one guru. Crucially, if a Reporting Guru value is present but resolves to
       // nothing (blank, typo, or a stray number), we STILL fall back to portfolio gurus — the
       // old code skipped the fallback whenever any value existed, leaving positions guru-less.
+      const resolvedSlugs = reportingGuruSlugs(pf['Reporting Guru(s)'])
+      const linkGuruIds = resolvedSlugs.map(s => guruIdBySlug[s]).filter(Boolean)
+      const finalGuruIds = linkGuruIds.length > 0 ? linkGuruIds : guruDbIds
+
       await prisma.positionGuru.deleteMany({ where: { positionId: position.id } })
-
-      const resolvedSlugs = new Set<string>()
-      for (const guruName of reportingGuruNames) {
-        const slug = resolveGuruSlug(guruName)
-        if (slug) resolvedSlugs.add(slug)
+      for (const guruId of finalGuruIds) {
+        await prisma.positionGuru.create({ data: { positionId: position.id, guruId } })
       }
-
-      let gurusLinked = 0
-      for (const slug of resolvedSlugs) {
-        const guruInfo = Object.values(GURU_NAMES).find(g => g.slug === slug)
-        if (!guruInfo) continue
-        // Ensure the guru row exists even if this pub's portfolio didn't seed it
-        const guru = await prisma.guru.upsert({
-          where: { slug },
-          update: { name: guruInfo.name },
-          create: { name: guruInfo.name, slug },
-        })
-        await prisma.positionGuru.create({ data: { positionId: position.id, guruId: guru.id } })
-        gurusLinked++
-      }
-
-      if (gurusLinked === 0) {
-        // Fall back to portfolio-level gurus
-        for (const guruId of guruDbIds) {
-          await prisma.positionGuru.create({ data: { positionId: position.id, guruId } })
-        }
-      }
-
-      synced++
 
       // Track trade-level types to back-fill position investmentType with full context
       const tradeTypes: string[] = []
-
-      for (const aTrade of tradeRecords) {
+      for (const aTrade of posTradeRecords) {
         const tf = aTrade.fields
         const action = tf['Action']?.name || tf['Action'] || ''
         const optionType = tf['Option Type']?.name || tf['Option Type'] || ''
@@ -222,40 +233,26 @@ async function syncPub(pubCode: string, tradesByPositionId: Map<string, any[]>) 
         )
         tradeTypes.push(tradeInvType)
 
+        const tradeData = {
+          name: tf['Trade Name'] || tf['Trade Name (INTERNAL)'] || '',
+          symbol: tf['SYMBOL'] || '',
+          action,
+          toOpenOrClose,
+          weight: tf['Weight'] ?? null,
+          tradePrice: tf['Trade Price'] ?? null,
+          tradeDate: tf['Trade Date'] ? new Date(tf['Trade Date']) : null,
+          investmentType: tradeInvType,
+          optionType: tf['Option Type']?.name || tf['Option Type'] || null,
+          buyingPowerRequired: tf['Buying Power Required (Weighted)'] ?? null,
+          marginRequirement: tf['Margin Requirement'] ?? null,
+          latestPrice: tf['Latest Price'] ?? null,
+          tradeReturn: tf['Trade Return'] ?? null,
+        }
+
         await prisma.trade.upsert({
           where: { airtableId: aTrade.id },
-          update: {
-            name: tf['Trade Name'] || tf['Trade Name (INTERNAL)'] || '',
-            symbol: tf['SYMBOL'] || '',
-            action,
-            toOpenOrClose: tf['To Open or Close']?.name || tf['To Open or Close'] || '',
-            weight: tf['Weight'] ?? null,
-            tradePrice: tf['Trade Price'] ?? null,
-            tradeDate: tf['Trade Date'] ? new Date(tf['Trade Date']) : null,
-            investmentType: tradeInvType,
-            optionType: tf['Option Type']?.name || tf['Option Type'] || null,
-            buyingPowerRequired: tf['Buying Power Required (Weighted)'] ?? null,
-            marginRequirement: tf['Margin Requirement'] ?? null,
-            latestPrice: tf['Latest Price'] ?? null,
-            tradeReturn: tf['Trade Return'] ?? null,
-          },
-          create: {
-            airtableId: aTrade.id,
-            positionId: position.id,
-            name: tf['Trade Name'] || tf['Trade Name (INTERNAL)'] || '',
-            symbol: tf['SYMBOL'] || '',
-            action,
-            toOpenOrClose: tf['To Open or Close']?.name || tf['To Open or Close'] || '',
-            weight: tf['Weight'] ?? null,
-            tradePrice: tf['Trade Price'] ?? null,
-            tradeDate: tf['Trade Date'] ? new Date(tf['Trade Date']) : null,
-            investmentType: tradeInvType,
-            optionType: tf['Option Type']?.name || tf['Option Type'] || null,
-            buyingPowerRequired: tf['Buying Power Required (Weighted)'] ?? null,
-            marginRequirement: tf['Margin Requirement'] ?? null,
-            latestPrice: tf['Latest Price'] ?? null,
-            tradeReturn: tf['Trade Return'] ?? null,
-          },
+          update: tradeData,
+          create: { airtableId: aTrade.id, positionId: position.id, ...tradeData },
         })
       }
 
@@ -265,7 +262,6 @@ async function syncPub(pubCode: string, tradesByPositionId: Map<string, any[]>) 
       const DIRECTIONAL_OPTIONS = ['CALL', 'PUT']
       let refinedType = investmentType
       if (tradeTypes.some(t => INCOME.includes(t))) {
-        // Use the first income type found (PUT_SELL takes precedence)
         refinedType = tradeTypes.find(t => t === 'PUT_SELL') || tradeTypes.find(t => INCOME.includes(t)) || investmentType
       } else if (tradeTypes.some(t => DIRECTIONAL_OPTIONS.includes(t))) {
         refinedType = tradeTypes.find(t => DIRECTIONAL_OPTIONS.includes(t)) || investmentType
@@ -280,7 +276,10 @@ async function syncPub(pubCode: string, tradesByPositionId: Map<string, any[]>) 
       }
     }
 
-    // Group partial closes
+    await mapLimit(positionRecords, POSITION_CONCURRENCY, syncPosition)
+    const synced = positionRecords.length
+
+    // Group partial closes: positions sharing name + open date collapse under one parent.
     const allPositions = await prisma.position.findMany({
       where: { portfolioId: portfolio.id },
       orderBy: { openDate: 'asc' },
@@ -293,17 +292,16 @@ async function syncPub(pubCode: string, tradesByPositionId: Map<string, any[]>) 
       groups.get(key)!.push(pos)
     }
 
+    const childUpdates: { childId: string; parentId: string }[] = []
     for (const group of groups.values()) {
       if (group.length > 1) {
         const [parent, ...children] = group
-        for (const child of children) {
-          await prisma.position.update({
-            where: { id: child.id },
-            data: { parentPositionId: parent.id },
-          })
-        }
+        for (const child of children) childUpdates.push({ childId: child.id, parentId: parent.id })
       }
     }
+    await mapLimit(childUpdates, POSITION_CONCURRENCY, u =>
+      prisma.position.update({ where: { id: u.childId }, data: { parentPositionId: u.parentId } })
+    )
 
     await prisma.syncLog.update({
       where: { id: log.id },
@@ -328,23 +326,11 @@ export async function POST(req: NextRequest) {
   const singlePub = req.nextUrl.searchParams.get('pubCode')
   const codesToSync = singlePub ? [singlePub.toUpperCase()] : PUB_CODES
 
-  // Return 202 immediately; sync runs in background after response
+  // Return 202 immediately; sync runs in background after response. Each pub fetches only
+  // its own positions and trades, so the job stays small enough to complete.
   after(async () => {
-    const allTradeRecords = await airtableFetch(TABLES.trades)
-    const tradesByPositionId = new Map<string, any[]>()
-    for (const trade of allTradeRecords) {
-      const parentLinks = trade.fields['Parent Position']
-      const links = Array.isArray(parentLinks) ? parentLinks : []
-      for (const link of links) {
-        const linkId = typeof link === 'object' ? link.id : link
-        if (linkId) {
-          if (!tradesByPositionId.has(linkId)) tradesByPositionId.set(linkId, [])
-          tradesByPositionId.get(linkId)!.push(trade)
-        }
-      }
-    }
     for (const pubCode of codesToSync) {
-      await syncPub(pubCode, tradesByPositionId)
+      await syncPub(pubCode)
     }
   })
 
