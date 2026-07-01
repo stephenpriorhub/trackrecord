@@ -19,7 +19,13 @@ const GURU_NAMES: Record<string, { slug: string; name: string }> = {
   'Bryan Bottarelli': { slug: 'bryan', name: 'Bryan Bottarelli' },
   'Karim Rahemtulla': { slug: 'karim', name: 'Karim Rahemtulla' },
   'Nate Bear': { slug: 'nate', name: 'Nate Bear' },
+  'George': { slug: 'george', name: 'George' },
 }
+
+// War Room is single-owner per position: Bryan and Karim never co-trade (the Trade Guru
+// field has zero Bryan/Karim overlap). MTA/PMR resolve to exactly one guru from Trade Guru;
+// Trend Advisory (TPU) is co-managed, so a blank position falls back to both editors.
+const SINGLE_OWNER_PUBS = new Set(['MTA', 'PMR'])
 
 // Airtable's "Reporting Guru(s)" field (and the underlying editor fields) are wildly
 // inconsistent across the three services: initials ('B', 'K'), first names ('Bryan'),
@@ -29,18 +35,12 @@ const GURU_ALIASES: Record<string, string> = {
   b: 'bryan', bryan: 'bryan', 'bryan bottarelli': 'bryan', bottarelli: 'bryan',
   k: 'karim', karim: 'karim', 'karim rahemtulla': 'karim', rahemtulla: 'karim',
   n: 'nate', nate: 'nate', 'nate bear': 'nate', bear: 'nate',
+  george: 'george', // War Room analyst tracked as his own guru (distinct from "Neil George")
 }
-
-// Editors/assistants who appear in the guru field but are NOT tracked traders. They are
-// dropped during resolution — a position whose only value is ignored falls back to the
-// portfolio's real gurus, and mixed values (e.g. "Bryan Bottarelli, George") keep the real one.
-const GURU_IGNORE = new Set(['george'])
 
 function resolveGuruSlug(raw: unknown): string | null {
   if (typeof raw !== 'string') return null
-  const key = raw.trim().toLowerCase()
-  if (GURU_IGNORE.has(key)) return null
-  return GURU_ALIASES[key] || null
+  return GURU_ALIASES[raw.trim().toLowerCase()] || null
 }
 
 // Run an async mapper over items with a bounded number of concurrent workers.
@@ -211,14 +211,40 @@ async function syncPub(pubCode: string) {
         create: { airtableId: aPos.id, portfolioId: portfolio.id, ...positionData },
       })
 
-      // Sync PositionGuru records — prefer Reporting Guru(s), fall back to portfolio gurus.
-      // Resolve every raw name through the alias map so 'B'/'Bryan'/'Bryan Bottarelli' all
-      // collapse to one guru. Crucially, if a Reporting Guru value is present but resolves to
-      // nothing (blank, typo, or a stray number), we STILL fall back to portfolio gurus — the
-      // old code skipped the fallback whenever any value existed, leaving positions guru-less.
-      const resolvedSlugs = reportingGuruSlugs(pf['Reporting Guru(s)'])
-      const linkGuruIds = resolvedSlugs.map(s => guruIdBySlug[s]).filter(Boolean)
-      const finalGuruIds = linkGuruIds.length > 0 ? linkGuruIds : guruDbIds
+      // Attribute the position's guru(s).
+      // Single-owner pubs (War Room, Post-Market Profits): use the per-trade Trade Guru field —
+      // the authoritative owner, with zero Bryan/Karim overlap. Pick the guru on the most trades
+      // (ties break to the earliest/opening trade). If no trade records an owner, default to the
+      // pub's primary editor rather than assigning both — the old position-level "Reporting
+      // Guru(s)" formula falsely reported "Bryan, Karim" for these no-owner positions.
+      // Co-managed pubs (Trend Advisory): resolve Reporting Guru(s); a blank falls back to both.
+      let finalGuruIds: string[]
+      if (SINGLE_OWNER_PUBS.has(pubCode)) {
+        const counts = new Map<string, number>()
+        const firstDate = new Map<string, number>()
+        for (const aTrade of posTradeRecords) {
+          const tg = aTrade.fields['Trade Guru']
+          const links = Array.isArray(tg) ? tg : (tg ? [tg] : [])
+          const td = aTrade.fields['Trade Date'] ? Date.parse(aTrade.fields['Trade Date']) : Number.MAX_SAFE_INTEGER
+          const seen = new Set<string>()
+          for (const link of links) {
+            const slug = resolveGuruSlug(typeof link === 'string' ? link : link?.name)
+            if (!slug || seen.has(slug)) continue
+            seen.add(slug)
+            counts.set(slug, (counts.get(slug) || 0) + 1)
+            if (!firstDate.has(slug) || td < firstDate.get(slug)!) firstDate.set(slug, td)
+          }
+        }
+        const owners = [...counts.keys()]
+        owners.sort((a, b) => (counts.get(b)! - counts.get(a)!) || (firstDate.get(a)! - firstDate.get(b)!))
+        // War Room and Post-Market Profits are both Bryan-primary services.
+        const ownerSlug = owners[0] || 'bryan'
+        finalGuruIds = [guruIdBySlug[ownerSlug]].filter(Boolean)
+      } else {
+        const resolvedSlugs = reportingGuruSlugs(pf['Reporting Guru(s)'])
+        const linkGuruIds = resolvedSlugs.map(s => guruIdBySlug[s]).filter(Boolean)
+        finalGuruIds = linkGuruIds.length > 0 ? linkGuruIds : guruDbIds
+      }
 
       await prisma.positionGuru.deleteMany({ where: { positionId: position.id } })
       for (const guruId of finalGuruIds) {
