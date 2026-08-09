@@ -1,13 +1,15 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { NextRequest, NextResponse } from 'next/server'
 import { PrismaClient } from '@prisma/client'
+import { resolvePubCodes } from '@/lib/publications'
 
 const prisma = new PrismaClient()
 
 
 export async function GET(req: NextRequest) {
   const { searchParams } = req.nextUrl
-  const pubCodes = searchParams.get('pubCodes')?.split(',').filter(Boolean) || []
+  // Real pub codes (WAR/PMK/TPU); legacy Airtable codes (MTA/PMR) are accepted and mapped.
+  const pubCodes = resolvePubCodes(searchParams.get('pubCodes')?.split(',').filter(Boolean) || [])
   const gurus = searchParams.get('gurus')?.split(',').filter(Boolean) || []
   const types = searchParams.get('types')?.split(',').filter(Boolean) || []
   const spreadTypes = searchParams.get('spreadTypes')?.split(',').filter(Boolean) || []
@@ -71,7 +73,6 @@ export async function GET(req: NextRequest) {
     const noReturn = positions.filter(p => p.positionReturn === null)
     const returns = withReturn.map(p => p.positionReturn!)
     const winners = returns.filter(r => r > 0)
-    const losers = returns.filter(r => r <= 0)
     const daysArr = withReturn.map(p => p.daysHeld).filter((d): d is number => d !== null)
 
     // Simple average return (pct, 1 decimal)
@@ -94,18 +95,19 @@ export async function GET(req: NextRequest) {
       ? Math.round((weightedSum / totalWeight) * 1000) / 10
       : null
 
+    // Deliberately NOT reported: loser count and worst trade. The track record surfaces
+    // trade count, winners, win rate and returns — losing-side detail is not exposed by
+    // this API, so no consumer (dashboard, embed) can render it.
     return {
       total: withReturn.length,
       unresolvedCount: noReturn.length,
       winners: winners.length,
-      losers: losers.length,
       winRate: withReturn.length > 0
         ? Math.round((winners.length / withReturn.length) * 1000) / 10
         : 0,
       avgReturn,
       avgWeightedReturn,
       largestWinner: returns.length ? Math.round(Math.max(...returns) * 1000) / 10 : null,
-      largestLoser: returns.length ? Math.round(Math.min(...returns) * 1000) / 10 : null,
       avgDaysHeld: daysArr.length
         ? Math.round(daysArr.reduce((a, b) => a + b, 0) / daysArr.length)
         : null,

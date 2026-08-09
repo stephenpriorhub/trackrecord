@@ -3,16 +3,28 @@ import { NextRequest, NextResponse } from 'next/server'
 import { after } from 'next/server'
 import { PrismaClient } from '@prisma/client'
 import { airtableFetch, TABLES, classifyInvestmentType, detectSpreadType } from '@/lib/airtable'
+import { AIRTABLE_PUB_CODES, AIRTABLE_TO_PUB_CODE, PUB_NAMES, resolvePubCode } from '@/lib/publications'
 import warRoomOwners from '@/data/warRoomOwners.json'
 
 const prisma = new PrismaClient()
 
-// Verified War Room owner map (Bryan vs Karim) derived from the manually-maintained
-// track-record spreadsheet, keyed by normalized OCC symbol. Used ONLY to resolve War Room
-// positions where Airtable has no per-trade owner — never overrides an Airtable Trade Guru.
-const WAR_ROOM_OWNERS = warRoomOwners as Record<string, string>
+// Verified War Room owner map, generated from the manually-maintained track-record
+// workbook (every sheet's B/K column) by scripts/build-war-room-owners.py. All 8,846
+// harvested rows carry exactly one owner and none of the 21 overlapping sheet cuts
+// contradicts another — Bryan and Karim never co-own a War Room pick, which makes this
+// workbook the authority on who made each one.
+//   occ    — exact option contract: "TICKER|YYMMDD|C/P|STRIKE"   (2,366 keys, no conflicts)
+//   dated  — underlying ticker + open date: "TICKER@YYYY-MM-DD"  (3,235 keys, no conflicts)
+//   ticker — bare ticker, last owner to trade it                  (436 keys, ambiguous)
+// Covers 96% of War Room positions (3,193 of 3,313); the rest are trades opened since the
+// last export, which is why Airtable's Trade Guru stays in the chain below it.
+const WAR_ROOM_OWNERS = warRoomOwners as {
+  occ: Record<string, string>
+  dated: Record<string, string>
+  ticker: Record<string, string>
+}
 
-// Normalize an Airtable SYMBOL to the same key format used in warRoomOwners.json:
+// Normalize an Airtable SYMBOL to the key format used in warRoomOwners.json:
 // options -> "TICKER|YYMMDD|C/P|STRIKE" (strike as integer), otherwise the bare ticker.
 function ownerKeyFromSymbol(symbol: unknown): string | null {
   if (typeof symbol !== 'string') return null
@@ -23,8 +35,41 @@ function ownerKeyFromSymbol(symbol: unknown): string | null {
   return s
 }
 
-// Airtable pub codes: MTA = War Room, PMR = Post Market Profits, TPU = Monument Trend Advisory
-const PUB_CODES = ['TPU', 'MTA', 'PMR']
+// Look a War Room position up in the verified workbook.
+//
+// `exact` matches an option contract or an underlying+open-date pair — both unambiguous,
+// so they outrank Airtable. `loose` matches the bare ticker, which only records the LAST
+// owner to trade that ticker; on multi-year LEAPS rolls it can name the wrong editor, so
+// it sits BELOW Airtable's per-trade Trade Guru and is a last resort before the default.
+function warRoomOwnerFor(
+  symbols: string[],
+  openDate: unknown,
+  tier: 'exact' | 'loose',
+): string | null {
+  const keys = symbols.map(ownerKeyFromSymbol).filter((k): k is string => !!k)
+
+  if (tier === 'loose') {
+    for (const k of keys) {
+      if (!k.includes('|') && WAR_ROOM_OWNERS.ticker[k]) return WAR_ROOM_OWNERS.ticker[k]
+    }
+    return null
+  }
+
+  for (const k of keys) {
+    if (k.includes('|') && WAR_ROOM_OWNERS.occ[k]) return WAR_ROOM_OWNERS.occ[k]
+  }
+  const day = openDate instanceof Date && !isNaN(openDate.getTime())
+    ? openDate.toISOString().slice(0, 10)
+    : null
+  if (day) {
+    for (const k of keys) {
+      // `dated` is keyed by the underlying ticker, so an option key matches on its root.
+      const owner = WAR_ROOM_OWNERS.dated[`${k.split('|')[0]}@${day}`]
+      if (owner) return owner
+    }
+  }
+  return null
+}
 
 // How many positions to process against Postgres at once. The heavy work is DB writes,
 // so a modest concurrency turns a ~10k-record sequential crawl into a job that finishes
@@ -39,10 +84,11 @@ const GURU_NAMES: Record<string, { slug: string; name: string }> = {
   'George': { slug: 'george', name: 'George' },
 }
 
-// War Room is single-owner per position: Bryan and Karim never co-trade (the Trade Guru
-// field has zero Bryan/Karim overlap). MTA/PMR resolve to exactly one guru from Trade Guru;
-// Trend Advisory (TPU) is co-managed, so a blank position falls back to both editors.
-const SINGLE_OWNER_PUBS = new Set(['MTA', 'PMR'])
+// War Room is single-owner per position: Bryan and Karim never co-own a pick, so a WAR or
+// PMK position resolves to exactly one guru and never to a Bryan+Karim pair. Trend Advisory
+// (TPU) is still co-managed here — pending a verified TPU owner sheet, a position with no
+// per-trade owner falls back to both editors.
+const SINGLE_OWNER_PUBS = new Set(['WAR', 'PMK'])
 
 // Airtable's "Reporting Guru(s)" field (and the underlying editor fields) are wildly
 // inconsistent across the three services: initials ('B', 'K'), first names ('Bryan'),
@@ -109,7 +155,10 @@ function reportingGuruSlugs(rawReportingGurus: any): string[] {
   return [...slugs]
 }
 
-async function syncPub(pubCode: string) {
+// `airtableCode` is the Pub Code as stored in Airtable ('MTA', 'PMR', 'TPU'); `pubCode` is
+// the publication's real code ('WAR', 'PMK', 'TPU') and is what gets written to Postgres.
+async function syncPub(airtableCode: string) {
+  const pubCode = AIRTABLE_TO_PUB_CODE[airtableCode] ?? airtableCode
   const log = await prisma.syncLog.create({
     data: { pubCode, status: 'running' },
   })
@@ -118,7 +167,7 @@ async function syncPub(pubCode: string) {
     const guruIdBySlug = await ensureGurus()
 
     const portfolioRecords = await airtableFetch(TABLES.portfolios, {
-      filterByFormula: `{Pub Code} = "${pubCode}"`,
+      filterByFormula: `{Pub Code} = "${airtableCode}"`,
     })
 
     if (!portfolioRecords.length) {
@@ -132,34 +181,32 @@ async function syncPub(pubCode: string) {
     const aPortfolio = portfolioRecords[0]
     const fields = aPortfolio.fields
 
-    // Portfolio-level guru fallback, used when a position has no resolvable "Reporting Guru(s)".
-    // Source of truth: brain vault publication descriptions (Resources/MTA Publication Descriptions.md).
-    // Note: this base's Pub Code "PMR" = editorial code "PMK" = Post-Market Profits, a Bryan-only service.
+    // Portfolio-level editor list. Source of truth: brain vault publication descriptions
+    // (Resources/MTA Publication Descriptions.md). This describes who runs the service —
+    // it is NOT per-position attribution, which is resolved per position below.
     const pubGuruMap: Record<string, string[]> = {
       TPU: ['bryan', 'karim'], // Monument Trend Advisory — Karim & Bryan
-      MTA: ['bryan', 'karim'], // The War Room — Bryan & Karim
-      PMR: ['bryan'],          // Post-Market Profits — Bryan Bottarelli only
+      WAR: ['bryan', 'karim'], // The War Room — Bryan & Karim (each pick owned by one of them)
+      PMK: ['bryan'],          // Post-Market Profits — Bryan Bottarelli only
     }
 
     const guruDbIds = (pubGuruMap[pubCode] || [])
       .map(slug => guruIdBySlug[slug])
       .filter(Boolean)
 
+    // Store the publication's real name, not Airtable's "Portfolio Name" — that column
+    // carries the same mislabelling as the Pub Code (e.g. "MTA War Room").
+    const portfolioData = {
+      pubCode,
+      name: PUB_NAMES[pubCode] || fields['Portfolio Name'] || pubCode,
+      businessUnit: fields['Business Unit']?.name || 'Monument Traders Alliance',
+      status: fields['Portfolio Status']?.name || 'Open',
+    }
+
     const portfolio = await prisma.portfolio.upsert({
       where: { airtableId: aPortfolio.id },
-      update: {
-        pubCode,
-        name: fields['Portfolio Name'] || pubCode,
-        businessUnit: fields['Business Unit']?.name || 'Monument Traders Alliance',
-        status: fields['Portfolio Status']?.name || 'Open',
-      },
-      create: {
-        airtableId: aPortfolio.id,
-        pubCode,
-        name: fields['Portfolio Name'] || pubCode,
-        businessUnit: fields['Business Unit']?.name || 'Monument Traders Alliance',
-        status: fields['Portfolio Status']?.name || 'Open',
-      },
+      update: portfolioData,
+      create: { airtableId: aPortfolio.id, ...portfolioData },
     })
 
     await prisma.portfolioGuru.deleteMany({ where: { portfolioId: portfolio.id } })
@@ -228,15 +275,20 @@ async function syncPub(pubCode: string) {
         create: { airtableId: aPos.id, portfolioId: portfolio.id, ...positionData },
       })
 
-      // Attribute the position's guru(s).
-      // Single-owner pubs (War Room, Post-Market Profits): use the per-trade Trade Guru field —
-      // the authoritative owner, with zero Bryan/Karim overlap. Pick the guru on the most trades
-      // (ties break to the earliest/opening trade). If no trade records an owner, default to the
-      // pub's primary editor rather than assigning both — the old position-level "Reporting
-      // Guru(s)" formula falsely reported "Bryan, Karim" for these no-owner positions.
-      // Co-managed pubs (Trend Advisory): resolve Reporting Guru(s); a blank falls back to both.
+      // Attribute the position to exactly ONE guru for single-owner pubs. Bryan and Karim
+      // never make a joint pick, so these must never resolve to a Bryan+Karim pair.
+      //
+      // War Room order of authority:
+      //   1. an unambiguous match in the verified workbook (data/warRoomOwners.json) — the
+      //      published record editorial maintains by hand, with an explicit B/K per row;
+      //   2. Airtable's per-trade "Trade Guru", for positions opened since the last export;
+      //   3. a bare-ticker match in the workbook (see warRoomOwnerFor);
+      //   4. Bryan, the primary editor.
+      // Do NOT use the position-level "Reporting Guru(s)" formula here: it defaults to the
+      // portfolio's two editors and so reports "Bryan, Karim" for any unattributed position.
       let finalGuruIds: string[]
       if (SINGLE_OWNER_PUBS.has(pubCode)) {
+        // Plurality owner across the position's trades; ties break to the opening trade.
         const counts = new Map<string, number>()
         const firstDate = new Map<string, number>()
         for (const aTrade of posTradeRecords) {
@@ -254,21 +306,18 @@ async function syncPub(pubCode: string) {
         }
         const owners = [...counts.keys()]
         owners.sort((a, b) => (counts.get(b)! - counts.get(a)!) || (firstDate.get(a)! - firstDate.get(b)!))
-        let ownerSlug: string
-        if (owners.length > 0) {
-          ownerSlug = owners[0]
-        } else if (pubCode === 'MTA') {
-          // No per-trade owner in Airtable — resolve from the verified War Room spreadsheet
-          // by trade symbol; fall back to Bryan (primary editor) if not listed there.
-          ownerSlug = 'bryan'
-          for (const aTrade of posTradeRecords) {
-            const key = ownerKeyFromSymbol(aTrade.fields['SYMBOL'])
-            const o = key ? WAR_ROOM_OWNERS[key] : undefined
-            if (o) { ownerSlug = o; break }
-          }
-        } else {
-          ownerSlug = 'bryan' // Post-Market Profits is Bryan-only
-        }
+
+        const symbols: string[] = pubCode === 'WAR'
+          ? [
+              ...(Array.isArray(positionData.symbols) ? positionData.symbols : []),
+              ...posTradeRecords.map((t: any) => t.fields['SYMBOL']).filter(Boolean),
+            ]
+          : []
+        const ownerSlug =
+          (symbols.length ? warRoomOwnerFor(symbols, positionData.openDate, 'exact') : null)
+          ?? owners[0]
+          ?? (symbols.length ? warRoomOwnerFor(symbols, positionData.openDate, 'loose') : null)
+          ?? 'bryan'
         finalGuruIds = [guruIdBySlug[ownerSlug]].filter(Boolean)
       } else {
         const resolvedSlugs = reportingGuruSlugs(pf['Reporting Guru(s)'])
@@ -386,16 +435,25 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
+  // ?pubCode= accepts either a real code (WAR/PMK/TPU) or an Airtable code (MTA/PMR/TPU);
+  // syncPub queries Airtable, so translate back to the Airtable code here.
   const singlePub = req.nextUrl.searchParams.get('pubCode')
-  const codesToSync = singlePub ? [singlePub.toUpperCase()] : PUB_CODES
+  const toAirtableCode = (c: string) => {
+    const real = resolvePubCode(c)
+    return AIRTABLE_PUB_CODES.find(a => AIRTABLE_TO_PUB_CODE[a] === real) ?? c.toUpperCase()
+  }
+  const codesToSync = singlePub ? [toAirtableCode(singlePub)] : [...AIRTABLE_PUB_CODES]
 
   // Return 202 immediately; sync runs in background after response. Each pub fetches only
   // its own positions and trades, so the job stays small enough to complete.
   after(async () => {
-    for (const pubCode of codesToSync) {
-      await syncPub(pubCode)
+    for (const airtableCode of codesToSync) {
+      await syncPub(airtableCode)
     }
   })
 
-  return NextResponse.json({ message: 'Sync started', pubCodes: codesToSync }, { status: 202 })
+  return NextResponse.json(
+    { message: 'Sync started', pubCodes: codesToSync.map(c => AIRTABLE_TO_PUB_CODE[c] ?? c) },
+    { status: 202 },
+  )
 }

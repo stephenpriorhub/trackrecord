@@ -1,5 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { PrismaClient } from '@prisma/client'
+import { pubName, resolvePubCode } from '@/lib/publications'
 
 const prisma = new PrismaClient()
 
@@ -11,16 +12,21 @@ export default async function EmbedPage({
   searchParams: Promise<{ guru?: string; type?: string; status?: string }>
 }) {
   const { pubCode } = await params
+  // Accepts the real code (/embed/WAR) or a legacy Airtable code (/embed/MTA).
+  const code = resolvePubCode(pubCode)
   const sp = await searchParams
   const where: any = {
     parentPositionId: null,
-    portfolio: { pubCode: pubCode.toUpperCase() },
+    portfolio: { pubCode: code },
   }
   if (sp.status === 'open') where.status = 'Open'
   else if (sp.status === 'closed') where.status = 'Closed'
   if (sp.type) where.investmentType = sp.type.toUpperCase()
+  // Filter on the POSITION's owner, not the portfolio's editor list. Filtering on the
+  // portfolio matched every War Room position for either editor, since both are listed
+  // as editors of the service; each individual pick has exactly one owner.
   if (sp.guru) {
-    where.portfolio = { ...where.portfolio, gurus: { some: { guru: { slug: sp.guru } } } }
+    where.gurus = { some: { guru: { slug: sp.guru } } }
   }
 
   const positions = await prisma.position.findMany({
@@ -33,7 +39,7 @@ export default async function EmbedPage({
   return (
     <div style={{ padding: '12px', fontSize: '13px', fontFamily: 'system-ui, sans-serif', maxWidth: '100%', boxSizing: 'border-box' }}>
       <div style={{ marginBottom: '12px', fontWeight: 700, fontSize: '16px', color: '#fff' }}>
-        {pubCode.toUpperCase()} Track Record
+        {pubName(code)} Track Record
       </div>
       <div style={{ width: '100%', maxWidth: '100%', overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
       <table style={{ width: '100%', minWidth: '480px', borderCollapse: 'collapse' }}>

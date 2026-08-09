@@ -2,12 +2,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
 import { useEffect, useState, useCallback, useRef } from 'react'
-
-const PUB_OPTIONS = [
-  { value: 'TPU', label: 'Monument Trend Advisory' },
-  { value: 'MTA', label: 'MTA War Room' },
-  { value: 'PMR', label: 'Post Market Profits' },
-]
+import { PUB_OPTIONS, pubName, resolvePubCode } from '@/lib/publications'
 
 const GURU_OPTIONS = [
   { value: 'bryan', label: 'Bryan Bottarelli' },
@@ -351,15 +346,16 @@ export default function TrackRecordDashboard() {
               <div className="text-xs text-gray-600">{s.total.toLocaleString()} closed · {stats?.openCount ?? 0} open</div>
             </div>
             <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3">
+              {/* Loser count and worst trade are intentionally never shown. */}
               <div className="bg-gray-900 border border-gray-800 rounded-lg p-4">
                 <div className="text-xs text-gray-500 uppercase tracking-wide mb-1"># of Trades</div>
                 <div className="text-2xl font-bold text-white">{s.total.toLocaleString()}</div>
-                <div className="text-xs text-gray-600 mt-1">{s.winners}W · {s.losers}L</div>
+                <div className="text-xs text-gray-600 mt-1">closed positions</div>
               </div>
               <div className="bg-gray-900 border border-gray-800 rounded-lg p-4">
                 <div className="text-xs text-gray-500 uppercase tracking-wide mb-1"># of Winners</div>
                 <div className="text-2xl font-bold text-green-400">{s.winners.toLocaleString()}</div>
-                <div className="text-xs text-gray-600 mt-1">{s.losers} losers</div>
+                <div className="text-xs text-gray-600 mt-1">of {s.total.toLocaleString()} closed</div>
               </div>
               <div className="bg-gray-900 border border-gray-800 rounded-lg p-4">
                 <div className="text-xs text-gray-500 uppercase tracking-wide mb-1">Win Rate</div>
@@ -390,9 +386,7 @@ export default function TrackRecordDashboard() {
                 <div className="text-2xl font-bold text-green-400">
                   {s.largestWinner !== null ? `+${s.largestWinner}%` : '—'}
                 </div>
-                <div className={`text-xs mt-1 ${statColor(s.largestLoser)}`}>
-                  worst: {s.largestLoser !== null ? `${s.largestLoser}%` : '—'}
-                </div>
+                <div className="text-xs text-gray-600 mt-1">best single trade</div>
               </div>
             </div>
           </div>
@@ -454,8 +448,11 @@ export default function TrackRecordDashboard() {
                         {(pos.symbols || []).join(', ') || '—'}
                       </td>
                       <td className="px-4 py-3">
-                        <span className="text-xs bg-gray-800 text-gray-300 px-2 py-0.5 rounded">
-                          {pos.portfolio?.pubCode}
+                        <span
+                          title={pubName(pos.portfolio?.pubCode ?? '')}
+                          className="text-xs bg-gray-800 text-gray-300 px-2 py-0.5 rounded cursor-help"
+                        >
+                          {resolvePubCode(pos.portfolio?.pubCode ?? '')}
                         </span>
                       </td>
                       <td className="px-4 py-3 text-gray-400 text-xs">{pos.investmentType}</td>
@@ -555,7 +552,7 @@ function DrillDownModal({ position, onClose }: { position: any; onClose: () => v
           <div>
             <h2 className="text-lg sm:text-xl font-bold text-white">{position.name}</h2>
             <div className="text-sm text-gray-400 mt-1">
-              {(position.symbols || []).join(', ')} · {position.portfolio?.pubCode}
+              {(position.symbols || []).join(', ')} · {pubName(position.portfolio?.pubCode ?? '')}
               {position.gurus?.length > 0 && ` · ${position.gurus.map((g: any) => g.guru.name).join(', ')}`}
               {' · '}{position.investmentType}
             </div>

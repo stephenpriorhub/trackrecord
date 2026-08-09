@@ -1,12 +1,14 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { NextRequest, NextResponse } from 'next/server'
 import { PrismaClient } from '@prisma/client'
+import { resolvePubCodes } from '@/lib/publications'
 
 const prisma = new PrismaClient()
 
 export async function GET(req: NextRequest) {
   const { searchParams } = req.nextUrl
-  const pubCodes = searchParams.get('pubCodes')?.split(',').filter(Boolean) || []
+  // Real pub codes (WAR/PMK/TPU); legacy Airtable codes (MTA/PMR) are accepted and mapped.
+  const pubCodes = resolvePubCodes(searchParams.get('pubCodes')?.split(',').filter(Boolean) || [])
   const gurus = searchParams.get('gurus')?.split(',').filter(Boolean) || []
   const types = searchParams.get('types')?.split(',').filter(Boolean) || []
   const spreadTypes = searchParams.get('spreadTypes')?.split(',').filter(Boolean) || []
