@@ -13,6 +13,7 @@ const GURU_OPTIONS = [
   { value: 'bryan', label: 'Bryan Bottarelli' },
   { value: 'karim', label: 'Karim Rahemtulla' },
   { value: 'nate', label: 'Nate Bear' },
+  { value: 'george', label: 'George' },
 ]
 
 const TYPE_OPTIONS = [
