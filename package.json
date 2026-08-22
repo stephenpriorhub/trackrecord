@@ -9,8 +9,9 @@
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
     "test:authz": "node --import tsx --env-file=.env scripts/test-authz.ts",
-    "test:all": "npm run typecheck && npm run test:authz",
-    "db:migrate": "prisma migrate deploy"
+    "test:all": "npm run typecheck && npm run test:authz && npm run test:positions",
+    "db:migrate": "prisma migrate deploy",
+    "test:positions": "node --import tsx --env-file=.env scripts/test-positions.ts"
   },
   "dependencies": {
     "@prisma/client": "5.22.0",
