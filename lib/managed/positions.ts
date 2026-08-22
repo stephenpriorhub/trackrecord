@@ -25,6 +25,7 @@ import { D, dec, ZERO, fraction } from "../money";
 import { buildOcc, describeOcc, normalizeUnderlying } from "../occ";
 import { classifyStructure, netCashPerUnit, type LegSpec } from "../structure";
 import { reduceLegFills, type FillLike, type LegLike } from "../pnl";
+import { ensureGurus } from "./gurus";
 
 export const STOCK_MULTIPLIER = 1;
 export const OPTION_MULTIPLIER = 100;
@@ -73,6 +74,8 @@ export interface CreatePositionInput {
   actorName?: string | null;
   source?: "MANUAL" | "AIRTABLE_IMPORT";
   airtableId?: string | null;
+  /** Who made the pick. Resolve it with lib/managed/war-room-owners.ts. */
+  guruSlug?: string | null;
 }
 
 /** The market ticker a leg prices against: a bare symbol, or an OCC option symbol. */
@@ -96,11 +99,18 @@ function marketTickerFor(underlying: string, leg: LegInput): string {
  * it. Reactivates a row that was previously retired rather than inserting a
  * duplicate, which keeps the last known price attached to closed history.
  */
-async function ensureInstrument(ticker: string, underlying: string, leg: LegInput) {
+async function ensureInstrument(
+  ticker: string,
+  underlying: string,
+  leg: LegInput,
+) {
   const base = {
     kind: leg.kind,
     underlying,
-    expiry: leg.kind === "OPTION" && leg.expiry ? new Date(`${leg.expiry}T00:00:00Z`) : null,
+    expiry:
+      leg.kind === "OPTION" && leg.expiry
+        ? new Date(`${leg.expiry}T00:00:00Z`)
+        : null,
     strike: leg.kind === "OPTION" && leg.strike ? leg.strike.toString() : null,
     right: leg.kind === "OPTION" ? leg.right : null,
     active: true,
@@ -117,7 +127,7 @@ function buildLabel(
   underlying: string,
   legs: LegInput[],
   structure: string,
-  tickers: string[]
+  tickers: string[],
 ): string {
   if (legs.length === 1) {
     return legs[0].kind === "STOCK" ? underlying : describeOcc(tickers[0]);
@@ -135,7 +145,8 @@ function buildLabel(
 }
 
 export async function createPosition(input: CreatePositionInput) {
-  if (input.legs.length === 0) throw new Error("A position needs at least one leg.");
+  if (input.legs.length === 0)
+    throw new Error("A position needs at least one leg.");
 
   const underlying = normalizeUnderlying(input.underlying);
   if (!underlying) throw new Error("Enter a ticker symbol.");
@@ -170,8 +181,19 @@ export async function createPosition(input: CreatePositionInput) {
   }
 
   const units = Math.max(1, Math.floor(input.units ?? 1));
-  const instrument = input.legs.every((l) => l.kind === "STOCK") ? "STOCK" : "OPTION";
+  const instrument = input.legs.every((l) => l.kind === "STOCK")
+    ? "STOCK"
+    : "OPTION";
   const label = buildLabel(underlying, input.legs, structure, tickers);
+
+  // Create the Guru row if it is missing rather than dropping the attribution.
+  // The table used to be populated only as a side effect of the Airtable sync, so
+  // importing into a database where the sync had not run produced silently
+  // unowned positions. An unrecognised slug still leaves the owner blank rather
+  // than failing the write — a blank an editor can fix beats losing their work.
+  const guruId = input.guruSlug
+    ? ((await ensureGurus()).get(input.guruSlug) ?? null)
+    : null;
 
   const position = await prisma.$transaction(async (tx) => {
     const created = await tx.managedPosition.create({
@@ -187,6 +209,7 @@ export async function createPosition(input: CreatePositionInput) {
         stopLossPrice: input.stopLossPrice?.toString() ?? null,
         targetPrice: input.targetPrice?.toString() ?? null,
         thesis: input.thesis ?? null,
+        guruId,
         source: input.source ?? "MANUAL",
         airtableId: input.airtableId ?? null,
         createdByEmail: input.actorEmail ?? null,
@@ -206,7 +229,8 @@ export async function createPosition(input: CreatePositionInput) {
 
     for (let i = 0; i < input.legs.length; i += 1) {
       const leg = input.legs[i];
-      const multiplier = leg.kind === "OPTION" ? OPTION_MULTIPLIER : STOCK_MULTIPLIER;
+      const multiplier =
+        leg.kind === "OPTION" ? OPTION_MULTIPLIER : STOCK_MULTIPLIER;
       const ratio = leg.ratio ?? 1;
       // Contracts of this leg = units of the position x this leg's ratio.
       const quantity = units * ratio;
@@ -218,7 +242,10 @@ export async function createPosition(input: CreatePositionInput) {
           kind: leg.kind,
           underlying,
           marketTicker: tickers[i],
-          expiry: leg.kind === "OPTION" && leg.expiry ? new Date(`${leg.expiry}T00:00:00Z`) : null,
+          expiry:
+            leg.kind === "OPTION" && leg.expiry
+              ? new Date(`${leg.expiry}T00:00:00Z`)
+              : null,
           strike: leg.strike?.toString() ?? null,
           right: leg.kind === "OPTION" ? leg.right : null,
           side: leg.side,
@@ -237,7 +264,12 @@ export async function createPosition(input: CreatePositionInput) {
           quantity,
           price: leg.price.toString(),
           multiplier,
-          cashFlow: signedCash(leg.side, leg.price, quantity, multiplier).toString(),
+          cashFlow: signedCash(
+            leg.side,
+            leg.price,
+            quantity,
+            multiplier,
+          ).toString(),
           executedAt: input.openedAt,
         },
       });
@@ -263,7 +295,12 @@ export async function createPosition(input: CreatePositionInput) {
 }
 
 /** Signed cash for a fill: buying pays out, selling takes in. */
-function signedCash(side: "BUY" | "SELL", price: D, quantity: number, multiplier: number): D {
+function signedCash(
+  side: "BUY" | "SELL",
+  price: D,
+  quantity: number,
+  multiplier: number,
+): D {
   const gross = price.times(quantity).times(multiplier);
   return side === "BUY" ? gross.negated() : gross;
 }
@@ -305,14 +342,14 @@ export async function closePosition(input: CloseInput) {
     }
     if (leg.openQty <= 0) {
       throw new Error(
-        `${leg.marketTicker} is already closed. Re-entering it is a new position.`
+        `${leg.marketTicker} is already closed. Re-entering it is a new position.`,
       );
     }
     const want = input.quantities?.[leg.id] ?? leg.openQty;
     if (want <= 0) throw new Error("Closing quantity must be at least 1.");
     if (want > leg.openQty) {
       throw new Error(
-        `Cannot close ${want} of ${leg.marketTicker} — only ${leg.openQty} is open.`
+        `Cannot close ${want} of ${leg.marketTicker} — only ${leg.openQty} is open.`,
       );
     }
   }
@@ -325,7 +362,8 @@ export async function closePosition(input: CloseInput) {
         executedAt: input.executedAt,
         // Flag a close that touches only part of a multi-leg position, since the
         // remaining legs keep running and the label no longer describes it.
-        leggedOut: position.legs.length > 1 && targets.length < position.legs.length,
+        leggedOut:
+          position.legs.length > 1 && targets.length < position.legs.length,
         note: input.note ?? null,
         createdByEmail: input.actorEmail ?? null,
       },
@@ -346,7 +384,12 @@ export async function closePosition(input: CloseInput) {
           quantity,
           price: price.toString(),
           multiplier: leg.multiplier,
-          cashFlow: signedCash(side, price, quantity, leg.multiplier).toString(),
+          cashFlow: signedCash(
+            side,
+            price,
+            quantity,
+            leg.multiplier,
+          ).toString(),
           executedAt: input.executedAt,
         },
       });
@@ -405,19 +448,17 @@ export async function recomputePosition(positionId: string) {
       legIndex: leg.legIndex,
       multiplier: leg.multiplier,
       side: leg.side,
-      fills: leg.fills.map(
-        (f): FillLike => ({
-          id: f.id,
-          intent: f.intent,
-          side: f.side,
-          quantity: f.quantity,
-          price: dec(f.price.toString()),
-          multiplier: f.multiplier,
-          executedAt: f.executedAt,
-          createdAt: f.createdAt,
-          deletedAt: f.deletedAt,
-        })
-      ),
+      fills: leg.fills.map((f): FillLike => ({
+        id: f.id,
+        intent: f.intent,
+        side: f.side,
+        quantity: f.quantity,
+        price: dec(f.price.toString()),
+        multiplier: f.multiplier,
+        executedAt: f.executedAt,
+        createdAt: f.createdAt,
+        deletedAt: f.deletedAt,
+      })),
     };
     const state = reduceLegFills(legLike);
 
@@ -431,7 +472,7 @@ export async function recomputePosition(positionId: string) {
         realizedPnl: state.realizedPnl.toString(),
         closedAt:
           state.openQty === 0 && state.closedQty > 0
-            ? leg.closedAt ?? lastFillDate(leg.fills)
+            ? (leg.closedAt ?? lastFillDate(leg.fills))
             : null,
       },
     });
@@ -444,14 +485,18 @@ export async function recomputePosition(positionId: string) {
     // credit spread's basis is its net debit.
     const sign = leg.side === "BUY" ? 1 : -1;
     if (state.wavgEntry) {
-      entryBasis = entryBasis.plus(state.wavgEntry.times(sign).times(leg.ratio));
+      entryBasis = entryBasis.plus(
+        state.wavgEntry.times(sign).times(leg.ratio),
+      );
     }
 
     if (state.openQty > 0) {
       // Mark ladder: a live provider price always wins. An editor-entered price
       // is the fallback, and only exists for instruments the provider cannot
       // price at all (interval and private funds have no exchange quote).
-      const live = leg.instrument.lastPrice ? dec(leg.instrument.lastPrice.toString()) : null;
+      const live = leg.instrument.lastPrice
+        ? dec(leg.instrument.lastPrice.toString())
+        : null;
       const manual = leg.instrument.manualPrice
         ? dec(leg.instrument.manualPrice.toString())
         : null;
@@ -465,7 +510,9 @@ export async function recomputePosition(positionId: string) {
         unpriced = true;
       }
     } else if (state.wavgExit) {
-      currentValue = currentValue.plus(state.wavgExit.times(sign).times(leg.ratio));
+      currentValue = currentValue.plus(
+        state.wavgExit.times(sign).times(leg.ratio),
+      );
       const d = lastFillDate(leg.fills);
       if (d && (!lastExit || d > lastExit)) lastExit = d;
     }
@@ -484,9 +531,13 @@ export async function recomputePosition(positionId: string) {
     where: { id: positionId },
     data: {
       status,
-      closedAt: status === "CLOSED" ? position.closedAt ?? lastExit ?? new Date() : null,
+      closedAt:
+        status === "CLOSED"
+          ? (position.closedAt ?? lastExit ?? new Date())
+          : null,
       cachedEntryPrice: entryBasis.isZero() ? null : entryBasis.toString(),
-      cachedCurrentPrice: unpriced || currentValue.isZero() ? null : currentValue.toString(),
+      cachedCurrentPrice:
+        unpriced || currentValue.isZero() ? null : currentValue.toString(),
       cachedReturnPct: returnPct?.toString() ?? null,
       cachedRealizedPnl: realized.toString(),
       cachedUnrealizedPnl:
@@ -500,10 +551,13 @@ export async function recomputePosition(positionId: string) {
   });
 }
 
-function lastFillDate(fills: { executedAt: Date; deletedAt: Date | null }[]): Date | null {
+function lastFillDate(
+  fills: { executedAt: Date; deletedAt: Date | null }[],
+): Date | null {
   const live = fills.filter((f) => !f.deletedAt);
   if (live.length === 0) return null;
-  return live.reduce((a, b) => (b.executedAt > a.executedAt ? b : a)).executedAt;
+  return live.reduce((a, b) => (b.executedAt > a.executedAt ? b : a))
+    .executedAt;
 }
 
 /** Recompute every position in a portfolio — used after a price refresh. */

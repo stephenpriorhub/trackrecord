@@ -1,9 +1,15 @@
 import { notFound } from "next/navigation";
 import Link from "next/link";
 import { prisma } from "@/lib/prisma";
-import { getCurrentHubUser } from "@/lib/hub-auth";
-import { getManageScope, canManagePortfolio } from "@/lib/authz";
-import ActionForm from "../ActionForm";
+import { getManageContext } from "@/lib/manage-context";
+import { canManagePortfolio, canManageAnything } from "@/lib/authz";
+import { portfolioStats } from "@/lib/managed/stats";
+import { benchmarkSince } from "@/lib/managed/benchmark";
+import { BENCHMARKS, benchmarkLabel } from "@/lib/publications";
+import NoManageAccess from "../../NoManageAccess";
+import { StatBar } from "../../StatBar";
+import EmbedBuilder from "./EmbedBuilder";
+import ActionForm from "../../ActionForm";
 import AddPositionForm from "./AddPositionForm";
 import {
   createPositionAction,
@@ -12,7 +18,7 @@ import {
   deletePositionAction,
   updatePortfolioAction,
   setManualPriceAction,
-} from "../actions";
+} from "../../actions";
 
 export const dynamic = "force-dynamic";
 
@@ -42,8 +48,8 @@ export default async function PortfolioPage({
   params: Promise<{ portfolioId: string }>;
 }) {
   const { portfolioId } = await params;
-  const user = await getCurrentHubUser();
-  const scope = await getManageScope(user);
+  const { user, scope } = await getManageContext();
+  if (!canManageAnything(scope)) return <NoManageAccess user={user} />;
 
   // Per-portfolio check. The layout only established that this person may be in
   // /manage at all; an editor assigned to one portfolio must not open another by
@@ -59,6 +65,7 @@ export default async function PortfolioPage({
         where: { deletedAt: null },
         orderBy: [{ status: "asc" }, { openedAt: "desc" }],
         include: {
+          guru: { select: { name: true } },
           legs: { orderBy: { legIndex: "asc" }, include: { instrument: true } },
           comments: {
             where: { deletedAt: null },
@@ -74,21 +81,32 @@ export default async function PortfolioPage({
   const open = portfolio.positions.filter((p) => p.status === "OPEN");
   const closed = portfolio.positions.filter((p) => p.status === "CLOSED");
 
+  const stats = await portfolioStats(portfolio.id);
+  const benchmark = portfolio.showBenchmark
+    ? await benchmarkSince(portfolio.benchmarkTicker, stats.since)
+    : null;
+  const origin = process.env.NEXT_PUBLIC_APP_ORIGIN ?? "https://trackrecord.oxfordhub.app";
+
   return (
     <div className="space-y-8">
       <div>
         <Link
-          href="/manage"
+          href={`/publication/${portfolio.service.slug}`}
           className="text-xs text-gray-500 hover:text-gray-300"
         >
-          ← All portfolios
+          ← {portfolio.service.name}
         </Link>
         <h2 className="mt-2 text-xl font-bold">{portfolio.name}</h2>
+        {portfolio.description && (
+          <p className="mt-1 max-w-prose text-sm text-gray-400">{portfolio.description}</p>
+        )}
         <p className="mt-1 text-xs text-gray-500">
-          {portfolio.service.name} · {open.length} open · {closed.length} closed
-          · vs {portfolio.benchmarkTicker}
+          {open.length} open · {closed.length} closed
+          {portfolio.showBenchmark && ` · vs ${benchmarkLabel(portfolio.benchmarkTicker)}`}
         </p>
       </div>
+
+      <StatBar stats={stats} benchmark={benchmark} showBenchmark={portfolio.showBenchmark} />
 
       <section className="rounded-xl border border-gray-800 bg-gray-900 p-5">
         <h3 className="mb-4 font-semibold">Add a position</h3>
@@ -114,49 +132,91 @@ export default async function PortfolioPage({
       <section className="rounded-xl border border-gray-800 bg-gray-900 p-5">
         <h3 className="mb-1 font-semibold">Portfolio settings</h3>
         <p className="mb-4 max-w-prose text-xs text-gray-500">
-          Making this public lets the embed be viewed by anyone with the link.
-          Renaming the portfolio does not change its embed link.
+          Making this public lets anyone with the link view the embed. Renaming does not
+          change the embed link.
         </p>
         <ActionForm
           action={updatePortfolioAction}
           submitLabel="Save settings"
-          className="flex flex-wrap items-end gap-3"
+          className="space-y-3"
         >
           <input type="hidden" name="portfolioId" value={portfolio.id} />
-          <label className="flex flex-col gap-1">
-            <span className="text-xs uppercase tracking-wide text-gray-500">
-              Name
-            </span>
-            <input
-              name="name"
-              defaultValue={portfolio.name}
-              className="w-56 rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-white"
-            />
-          </label>
-          <label className="flex flex-col gap-1">
-            <span className="text-xs uppercase tracking-wide text-gray-500">
-              Compare against
-            </span>
-            <input
-              name="benchmarkTicker"
-              defaultValue={portfolio.benchmarkTicker}
-              className="w-24 rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-white"
-            />
-          </label>
-          <label className="flex flex-col gap-1">
-            <span className="text-xs uppercase tracking-wide text-gray-500">
-              Embed
-            </span>
-            <select
-              name="visibility"
-              defaultValue={portfolio.visibility}
-              className="w-40 rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-white"
-            >
-              <option value="PRIVATE">Private</option>
-              <option value="PUBLIC">Public</option>
-            </select>
-          </label>
+          <div className="flex flex-wrap items-end gap-3">
+            <label className="flex flex-col gap-1">
+              <span className="text-xs uppercase tracking-wide text-gray-500">Name</span>
+              <input
+                name="name"
+                defaultValue={portfolio.name}
+                className="w-56 rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-white"
+              />
+            </label>
+            <label className="flex min-w-[18rem] flex-1 flex-col gap-1">
+              <span className="text-xs uppercase tracking-wide text-gray-500">
+                Description
+              </span>
+              <input
+                name="description"
+                defaultValue={portfolio.description ?? ""}
+                placeholder="Shown above the positions"
+                className="rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-white placeholder-gray-600"
+              />
+            </label>
+          </div>
+          <div className="flex flex-wrap items-end gap-3">
+            <label className="flex flex-col gap-1">
+              <span className="text-xs uppercase tracking-wide text-gray-500">
+                Compare against
+              </span>
+              <select
+                name="benchmarkTicker"
+                defaultValue={portfolio.benchmarkTicker}
+                className="w-52 rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-white"
+              >
+                {BENCHMARKS.map((b) => (
+                  <option key={b.ticker} value={b.ticker}>
+                    {b.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="flex flex-col gap-1">
+              <span className="text-xs uppercase tracking-wide text-gray-500">
+                Show benchmark
+              </span>
+              <select
+                name="showBenchmark"
+                defaultValue={portfolio.showBenchmark ? "1" : "0"}
+                className="w-32 rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-white"
+              >
+                <option value="1">Yes</option>
+                <option value="0">No</option>
+              </select>
+            </label>
+            <label className="flex flex-col gap-1">
+              <span className="text-xs uppercase tracking-wide text-gray-500">Embed</span>
+              <select
+                name="visibility"
+                defaultValue={portfolio.visibility}
+                className="w-36 rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-white"
+              >
+                <option value="PRIVATE">Private</option>
+                <option value="PUBLIC">Public</option>
+              </select>
+            </label>
+          </div>
         </ActionForm>
+      </section>
+
+      <section className="rounded-xl border border-gray-800 bg-gray-900 p-5">
+        <h3 className="mb-1 font-semibold">Embed this portfolio</h3>
+        <p className="mb-4 max-w-prose text-xs text-gray-500">
+          Pick what to show, then copy the code into any page.
+        </p>
+        <EmbedBuilder
+          slug={portfolio.slug}
+          origin={origin}
+          isPublic={portfolio.visibility === "PUBLIC"}
+        />
       </section>
     </div>
   );
@@ -177,6 +237,7 @@ type PositionRow = {
   cachedReturnPct: unknown;
   cachedUnpriced: boolean;
   cachedManualPriced: boolean;
+  guru: { name: string } | null;
   buyUpToPrice: unknown;
   stopLossPrice: unknown;
   legs: {
@@ -231,6 +292,14 @@ function PositionTable({
                   <div className="min-w-0 flex-1">
                     <p className="font-medium text-white">{p.label}</p>
                     <p className="mt-0.5 text-xs text-gray-500">
+                      {/* Who made the pick. In the War Room this is the whole
+                          point — Bryan and Karim never co-own a position. */}
+                      {p.guru ? (
+                        <span className="text-gray-400">{p.guru.name}</span>
+                      ) : (
+                        <span className="text-yellow-700">no owner set</span>
+                      )}
+                      {" · "}
                       {p.companyName ? `${p.companyName} · ` : ""}
                       opened {day(p.openedAt)}
                       {p.closedAt ? ` · closed ${day(p.closedAt)}` : ""}

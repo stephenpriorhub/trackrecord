@@ -22,6 +22,7 @@ import {
   type ManageScope,
 } from "@/lib/authz";
 import { createPortfolio, ensureService } from "@/lib/managed/portfolios";
+import { BENCHMARKS } from "@/lib/publications";
 import { createPosition, closePosition, type LegInput } from "@/lib/managed/positions";
 import { parseDecimal, type D } from "@/lib/money";
 
@@ -69,7 +70,7 @@ export async function createPortfolioAction(form: FormData): Promise<ActionResul
     after: { name: portfolio.name, slug: portfolio.slug },
   });
 
-  revalidatePath("/manage");
+  revalidatePath("/");
   return { ok: true, message: `Created "${portfolio.name}".` };
 }
 
@@ -83,13 +84,21 @@ export async function updatePortfolioAction(form: FormData): Promise<ActionResul
   if (!before) return { ok: false, error: "Portfolio not found." };
 
   const name = str(form.get("name")) || before.name;
-  const benchmarkTicker = (str(form.get("benchmarkTicker")) || before.benchmarkTicker).toUpperCase();
   const description = str(form.get("description")) || null;
   const visibility = str(form.get("visibility")) === "PUBLIC" ? "PUBLIC" : "PRIVATE";
+  const showBenchmark = str(form.get("showBenchmark")) !== "0";
+
+  // Only a benchmark we actually know how to price. A free-text ticker would
+  // silently produce no comparison at all, which reads as a bug rather than a
+  // typo, so an unrecognised value keeps the current one.
+  const requested = str(form.get("benchmarkTicker")).toUpperCase();
+  const benchmarkTicker = BENCHMARKS.some((b) => b.ticker === requested)
+    ? requested
+    : before.benchmarkTicker;
 
   const after = await prisma.managedPortfolio.update({
     where: { id },
-    data: { name, benchmarkTicker, description, visibility },
+    data: { name, benchmarkTicker, description, visibility, showBenchmark },
   });
 
   await logChange({
@@ -101,12 +110,14 @@ export async function updatePortfolioAction(form: FormData): Promise<ActionResul
     before: {
       name: before.name,
       benchmarkTicker: before.benchmarkTicker,
+      showBenchmark: before.showBenchmark,
       visibility: before.visibility,
       description: before.description,
     },
     after: {
       name: after.name,
       benchmarkTicker: after.benchmarkTicker,
+      showBenchmark: after.showBenchmark,
       visibility: after.visibility,
       description: after.description,
     },
@@ -115,8 +126,8 @@ export async function updatePortfolioAction(form: FormData): Promise<ActionResul
     summary: before.name !== after.name ? `Renamed from "${before.name}"` : undefined,
   });
 
-  revalidatePath("/manage");
-  revalidatePath(`/manage/${id}`);
+  revalidatePath("/");
+  revalidatePath(`/portfolio/${id}`);
   return { ok: true, message: "Saved." };
 }
 
@@ -149,7 +160,7 @@ export async function archivePortfolioAction(form: FormData): Promise<ActionResu
     before: { archivedAt: before.archivedAt },
   });
 
-  revalidatePath("/manage");
+  revalidatePath("/");
   return { ok: true, message: restore ? "Restored." : `Archived "${before.name}".` };
 }
 
@@ -191,7 +202,7 @@ export async function reorderPortfolioAction(form: FormData): Promise<ActionResu
     actor: user,
   });
 
-  revalidatePath("/manage");
+  revalidatePath("/");
   return { ok: true };
 }
 
@@ -216,7 +227,7 @@ export async function createServiceAction(form: FormData): Promise<ActionResult>
     after: { pubCode: service.pubCode, name: service.name },
   });
 
-  revalidatePath("/manage");
+  revalidatePath("/");
   return { ok: true, message: `Created "${service.name}".` };
 }
 
@@ -254,7 +265,7 @@ export async function grantAppManagerAction(form: FormData): Promise<ActionResul
     after: { email },
   });
 
-  revalidatePath("/manage/settings");
+  revalidatePath("/settings");
   return { ok: true, message: `${email} can now manage every portfolio.` };
 }
 
@@ -278,7 +289,7 @@ export async function revokeAppManagerAction(form: FormData): Promise<ActionResu
     before: { email: before.email },
   });
 
-  revalidatePath("/manage/settings");
+  revalidatePath("/settings");
   return { ok: true, message: `Removed ${before.email}.` };
 }
 
@@ -324,7 +335,7 @@ export async function assignEditorAction(form: FormData): Promise<ActionResult> 
     after: { email, serviceId, portfolioId },
   });
 
-  revalidatePath("/manage/settings");
+  revalidatePath("/settings");
   return { ok: true, message: `${email} can now edit ${serviceId ? "this service" : "this portfolio"}.` };
 }
 
@@ -348,7 +359,7 @@ export async function unassignEditorAction(form: FormData): Promise<ActionResult
     before: { email: before.email, serviceId: before.serviceId, portfolioId: before.portfolioId },
   });
 
-  revalidatePath("/manage/settings");
+  revalidatePath("/settings");
   return { ok: true, message: `Removed ${before.email}.` };
 }
 
@@ -446,7 +457,7 @@ export async function createPositionAction(form: FormData): Promise<ActionResult
       after: { label: position.label, openedAt: position.openedAt },
     });
 
-    revalidatePath(`/manage/${portfolioId}`);
+    revalidatePath(`/portfolio/${portfolioId}`);
     return { ok: true, message: `Added ${position.label}.` };
   } catch (err) {
     // Surface the library's own message: they are written for a guru to read
@@ -505,7 +516,7 @@ export async function closePositionAction(form: FormData): Promise<ActionResult>
       summary: Object.entries(quantities).length ? "Partial exit" : undefined,
     });
 
-    revalidatePath(`/manage/${position.portfolioId}`);
+    revalidatePath(`/portfolio/${position.portfolioId}`);
     return {
       ok: true,
       message: after?.status === "CLOSED" ? "Position closed." : "Partial exit recorded.",
@@ -546,7 +557,7 @@ export async function addCommentAction(form: FormData): Promise<ActionResult> {
     after: { body },
   });
 
-  revalidatePath(`/manage/${position.portfolioId}`);
+  revalidatePath(`/portfolio/${position.portfolioId}`);
   return { ok: true, message: "Comment added." };
 }
 
@@ -581,7 +592,7 @@ export async function deletePositionAction(form: FormData): Promise<ActionResult
     before: { label: position.label, deletedAt: position.deletedAt },
   });
 
-  revalidatePath(`/manage/${position.portfolioId}`);
+  revalidatePath(`/portfolio/${position.portfolioId}`);
   return { ok: true, message: restore ? "Restored." : `Removed ${position.label}.` };
 }
 
@@ -670,6 +681,6 @@ export async function setManualPriceAction(form: FormData): Promise<ActionResult
     after: { manualPrice: price?.toString() ?? null },
   });
 
-  revalidatePath(`/manage/${position.portfolioId}`);
+  revalidatePath(`/portfolio/${position.portfolioId}`);
   return { ok: true, message: clear ? `Cleared the manual price for ${ticker}.` : `Set ${ticker} to ${price}.` };
 }

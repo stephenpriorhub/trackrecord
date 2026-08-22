@@ -8,15 +8,16 @@ datasource db {
 }
 
 model Guru {
-  id          String          @id @default(cuid())
-  name        String
-  slug        String          @unique
-  portfolios  PortfolioGuru[]
-  positions   PositionGuru[]
-  trades      Trade[]
-  createdAt   DateTime        @default(now())
-  updatedAt   DateTime        @updatedAt
-  ServiceGuru ServiceGuru[]
+  id              String            @id @default(cuid())
+  name            String
+  slug            String            @unique
+  portfolios      PortfolioGuru[]
+  positions       PositionGuru[]
+  trades          Trade[]
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+  ServiceGuru     ServiceGuru[]
+  ManagedPosition ManagedPosition[]
 }
 
 model Portfolio {
@@ -243,8 +244,12 @@ model ManagedPortfolio {
   visibility  PortfolioVisibility @default(PRIVATE)
   archivedAt  DateTime?
 
-  /// Compared against on the embed header. Priced by the same snapshot job.
-  benchmarkTicker String @default("SPY")
+  /// Compared against on the embed header and the stats panels. Priced by the
+  /// same snapshot job. SPY (S&P 500) is the default.
+  benchmarkTicker String  @default("SPY")
+  /// Whether to show the comparison at all. Some books have no sensible index to
+  /// measure against, so it is a per-portfolio choice rather than always-on.
+  showBenchmark   Boolean @default(true)
 
   /// Set when this portfolio was seeded from an Airtable Trade Group, so a
   /// re-run of the import updates rather than duplicates.
@@ -304,6 +309,13 @@ model ManagedPosition {
   /// that caveat visible, never passed off as a market quote.
   cachedManualPriced  Boolean   @default(false)
   cachedAt            DateTime?
+
+  /// Who made this pick. Single-valued on purpose: in the War Room, Bryan and
+  /// Karim never co-own a position, and a nullable pair would let that back in.
+  /// Resolved by lib/managed/war-room-owners.ts, the same module the Airtable
+  /// sync uses, so the two sides cannot disagree about attribution.
+  guruId String?
+  guru   Guru?   @relation(fields: [guruId], references: [id], onDelete: SetNull)
 
   source     ManagedSource @default(MANUAL)
   /// Airtable Position record id, for import idempotency. Nothing is ever
@@ -513,6 +525,24 @@ model MarketInstrument {
 
   @@index([active])
   @@index([underlying])
+}
+
+/// A benchmark's daily close, cached per ticker and date.
+///
+/// This is what makes the comparison honest. A portfolio's return is measured
+/// from when its positions were opened, so comparing it against the benchmark's
+/// SESSION change would put a multi-year return next to one day of the index.
+/// Massive's daily aggregates give the close on any past date, and those never
+/// change, so one fetch per date is permanent.
+model BenchmarkClose {
+  ticker String
+  date   DateTime @db.Date
+  close  Decimal  @db.Decimal(18, 6)
+
+  createdAt DateTime @default(now())
+
+  @@id([ticker, date])
+  @@index([ticker, date])
 }
 
 /// An OxfordHub user designated to manage EVERY portfolio in the app, whatever

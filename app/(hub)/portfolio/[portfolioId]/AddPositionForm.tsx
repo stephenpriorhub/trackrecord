@@ -11,7 +11,7 @@
  * symbol; lib/occ.ts builds that from these fields.
  */
 import { useActionState, useState } from "react";
-import type { ActionResult } from "../actions";
+import type { ActionResult } from "../../actions";
 
 type Leg = {
   id: number;

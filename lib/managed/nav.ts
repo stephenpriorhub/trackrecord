@@ -78,13 +78,29 @@ function parseAsOf(raw: unknown): Date | null {
   if (typeof raw !== "string") return null;
   const m = raw.match(/([A-Z][a-z]{2})\s+(\d{1,2}),\s*(\d{4})/);
   if (!m) return null;
-  const months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+  const months = [
+    "Jan",
+    "Feb",
+    "Mar",
+    "Apr",
+    "May",
+    "Jun",
+    "Jul",
+    "Aug",
+    "Sep",
+    "Oct",
+    "Nov",
+    "Dec",
+  ];
   const mi = months.indexOf(m[1]);
   if (mi < 0) return null;
   return new Date(Date.UTC(Number(m[3]), mi, Number(m[2])));
 }
 
-async function tryClass(ticker: string, assetClass: NavAssetClass): Promise<NavQuote | null> {
+async function tryClass(
+  ticker: string,
+  assetClass: NavAssetClass,
+): Promise<NavQuote | null> {
   const url = `${BASE}/${encodeURIComponent(ticker)}/info?assetclass=${assetClass}`;
   const res = await fetch(url, {
     headers: headers(),
@@ -122,7 +138,7 @@ async function tryClass(ticker: string, assetClass: NavAssetClass): Promise<NavQ
  */
 export async function fetchNav(
   ticker: string,
-  knownClass?: string | null
+  knownClass?: string | null,
 ): Promise<NavQuote | null> {
   const order: NavAssetClass[] = knownClass
     ? [

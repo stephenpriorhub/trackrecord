@@ -23,10 +23,14 @@ export interface EmbedOptions {
 }
 
 /** Parse the embed's query string. Defaults show everything. */
-export function parseEmbedOptions(sp: Record<string, string | string[] | undefined>): EmbedOptions {
-  const one = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v);
+export function parseEmbedOptions(
+  sp: Record<string, string | string[] | undefined>,
+): EmbedOptions {
+  const one = (v: string | string[] | undefined) =>
+    Array.isArray(v) ? v[0] : v;
   const show = one(sp.show);
-  const off = (v: string | undefined) => v === "0" || v === "false" || v === "no";
+  const off = (v: string | undefined) =>
+    v === "0" || v === "false" || v === "no";
   return {
     show: show === "open" || show === "closed" ? show : "both",
     returns: !off(one(sp.returns)),
@@ -53,7 +57,12 @@ export interface EmbedRow {
 }
 
 export interface EmbedView {
-  portfolio: { id: string; name: string; slug: string; benchmarkTicker: string };
+  portfolio: {
+    id: string;
+    name: string;
+    slug: string;
+    benchmarkTicker: string;
+  };
   serviceName: string;
   open: EmbedRow[];
   closed: EmbedRow[];
@@ -88,14 +97,16 @@ function daysBetween(a: Date, b: Date): number {
  * average toward nothing whenever a contract goes quiet.
  */
 function meanReturn(rows: EmbedRow[]): D | null {
-  const present = rows.map((r) => r.returnPct).filter((v): v is D => v !== null);
+  const present = rows
+    .map((r) => r.returnPct)
+    .filter((v): v is D => v !== null);
   if (present.length === 0) return null;
   return present.reduce((a, b) => a.plus(b), ZERO).div(present.length);
 }
 
 export async function loadEmbedView(
   slug: string,
-  options: EmbedOptions
+  options: EmbedOptions,
 ): Promise<EmbedView | null> {
   const portfolio = await prisma.managedPortfolio.findUnique({
     where: { slug },
@@ -109,7 +120,11 @@ export async function loadEmbedView(
             orderBy: { legIndex: "asc" },
             include: {
               instrument: {
-                select: { lastPrice: true, lastPriceAt: true, priceSource: true },
+                select: {
+                  lastPrice: true,
+                  lastPriceAt: true,
+                  priceSource: true,
+                },
               },
             },
           },
@@ -125,7 +140,11 @@ export async function loadEmbedView(
             orderBy: { executedAt: "asc" },
             include: {
               fills: { where: { deletedAt: null }, include: { leg: true } },
-              comments: { where: { deletedAt: null }, orderBy: { createdAt: "desc" }, take: 1 },
+              comments: {
+                where: { deletedAt: null },
+                orderBy: { createdAt: "desc" },
+                take: 1,
+              },
             },
           },
         },
@@ -134,7 +153,8 @@ export async function loadEmbedView(
   });
 
   // A private or archived portfolio is indistinguishable from a wrong slug.
-  if (!portfolio || portfolio.visibility !== "PUBLIC" || portfolio.archivedAt) return null;
+  if (!portfolio || portfolio.visibility !== "PUBLIC" || portfolio.archivedAt)
+    return null;
 
   const open: EmbedRow[] = [];
   const closed: EmbedRow[] = [];
@@ -189,17 +209,24 @@ export async function loadEmbedView(
         returnPct,
         daysHeld: daysBetween(p.openedAt, exec.executedAt),
         unpriced: exitPrice === null,
-        comment: exec.comments[0]?.body ?? exec.note ?? p.comments[0]?.body ?? null,
+        comment:
+          exec.comments[0]?.body ?? exec.note ?? p.comments[0]?.body ?? null,
       });
     }
   }
 
   // Newest exits first, matching how the open table is ordered.
-  closed.sort((a, b) => (b.closedAt?.getTime() ?? 0) - (a.closedAt?.getTime() ?? 0));
+  closed.sort(
+    (a, b) => (b.closedAt?.getTime() ?? 0) - (a.closedAt?.getTime() ?? 0),
+  );
 
   // The headline compares like with like: whatever the reader can actually see.
   const shown =
-    options.show === "open" ? open : options.show === "closed" ? closed : [...open, ...closed];
+    options.show === "open"
+      ? open
+      : options.show === "closed"
+        ? closed
+        : [...open, ...closed];
 
   const benchmark = await prisma.marketInstrument.findUnique({
     where: { ticker: portfolio.benchmarkTicker },
@@ -237,8 +264,8 @@ export async function loadEmbedView(
           .flatMap((p) =>
             p.legs
               .filter((l) => l.openQty > 0 && l.instrument.lastPrice !== null)
-              .map((l) => l.instrument.priceSource as string)
-          )
+              .map((l) => l.instrument.priceSource as string),
+          ),
       ),
     ],
     options,
@@ -251,7 +278,11 @@ export async function loadEmbedView(
  * in, closing a short is a debit out, and a spread nets to one number.
  */
 function netExitPrice(
-  fills: { price: unknown; quantity: number; leg: { side: string; ratio: number } }[]
+  fills: {
+    price: unknown;
+    quantity: number;
+    leg: { side: string; ratio: number };
+  }[],
 ): D | null {
   if (fills.length === 0) return null;
   let total = ZERO;
@@ -273,7 +304,10 @@ function netExitPrice(
  * fresh. Null when nothing carries a timestamp (an all-options portfolio).
  */
 function oldestPriceAt(
-  positions: { status: string; legs: { openQty: number; instrument: { lastPriceAt: Date | null } }[] }[]
+  positions: {
+    status: string;
+    legs: { openQty: number; instrument: { lastPriceAt: Date | null } }[];
+  }[],
 ): Date | null {
   let oldest: Date | null = null;
   for (const p of positions) {

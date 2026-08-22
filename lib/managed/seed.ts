@@ -10,7 +10,11 @@
  */
 import { prisma } from "../prisma";
 import { PUB_NAMES } from "../publications";
-import { ensureService, linkServiceGuru, ensureMainPortfolio } from "./portfolios";
+import {
+  ensureService,
+  linkServiceGuru,
+  ensureMainPortfolio,
+} from "./portfolios";
 
 export interface SeedReport {
   servicesCreated: string[];
@@ -19,7 +23,11 @@ export interface SeedReport {
 }
 
 export async function seedServicesFromTrackRecord(): Promise<SeedReport> {
-  const report: SeedReport = { servicesCreated: [], gurusLinked: 0, portfoliosCreated: [] };
+  const report: SeedReport = {
+    servicesCreated: [],
+    gurusLinked: 0,
+    portfoliosCreated: [],
+  };
 
   // Only publications the app actually knows by name. A stray pub code appearing
   // in the mirror should not silently mint a service called "ABC".
@@ -35,7 +43,9 @@ export async function seedServicesFromTrackRecord(): Promise<SeedReport> {
       where: { pubCode },
       select: { gurus: { select: { guruId: true } } },
     });
-    const guruIds = [...new Set(mirrored.flatMap((p) => p.gurus.map((g) => g.guruId)))];
+    const guruIds = [
+      ...new Set(mirrored.flatMap((p) => p.gurus.map((g) => g.guruId))),
+    ];
     for (const guruId of guruIds) {
       await linkServiceGuru(service.id, guruId);
       report.gurusLinked += 1;

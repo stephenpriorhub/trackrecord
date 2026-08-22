@@ -11,7 +11,7 @@
 // layer may speak Airtable codes; Postgres, the APIs and the dashboard use the real ones.
 
 /** Pub Code values as they appear in the Airtable Portfolio Tracker base. */
-export const AIRTABLE_PUB_CODES = ['TPU', 'MTA', 'PMR', 'XAI'] as const
+export const AIRTABLE_PUB_CODES = ['TPU', 'MTA', 'PMR', 'XAI', 'NBS', 'PSU', 'DPL'] as const
 
 /** Airtable Pub Code -> the publication's real pub code. */
 export const AIRTABLE_TO_PUB_CODE: Record<string, string> = {
@@ -19,6 +19,9 @@ export const AIRTABLE_TO_PUB_CODE: Record<string, string> = {
   PMR: 'PMK',
   TPU: 'TPU',
   XAI: 'XAI',
+  NBS: 'NBS',
+  PSU: 'PSU',
+  DPL: 'DPL',
 }
 
 export const PUB_NAMES: Record<string, string> = {
@@ -26,6 +29,9 @@ export const PUB_NAMES: Record<string, string> = {
   PMK: 'Post-Market Profits',
   TPU: 'Monument Trend Advisory',
   XAI: 'McCall Innovation Report',
+  NBS: "Nate Bear's Sector Strike",
+  PSU: 'Profit Surge Trader',
+  DPL: 'Daily Profits Live',
 }
 
 /**
@@ -46,7 +52,25 @@ export function pubName(code: string): string {
 }
 
 /** Dropdown/filter options, in the order they should be shown. */
-export const PUB_OPTIONS = (['WAR', 'PMK', 'TPU', 'XAI'] as const).map(value => ({
-  value,
-  label: PUB_NAMES[value],
-}))
+export const PUB_OPTIONS = (
+  ['WAR', 'PMK', 'TPU', 'XAI', 'PSU', 'DPL', 'NBS'] as const
+).map(value => ({ value, label: PUB_NAMES[value] }))
+
+/**
+ * Benchmarks a portfolio can be measured against, by friendly name — nobody
+ * should have to know that the S&P 500 is "SPY" to pick it. The list is short on
+ * purpose: each one costs a daily-close lookup per distinct position open date.
+ */
+export const BENCHMARKS = [
+  { ticker: 'SPY', label: 'S&P 500' },
+  { ticker: 'QQQ', label: 'Nasdaq 100' },
+  { ticker: 'IWM', label: 'Russell 2000' },
+  { ticker: 'DIA', label: 'Dow 30' },
+  { ticker: 'MDY', label: 'S&P MidCap 400' },
+] as const
+
+export const DEFAULT_BENCHMARK = 'SPY'
+
+export function benchmarkLabel(ticker: string): string {
+  return BENCHMARKS.find(b => b.ticker === ticker)?.label ?? ticker
+}

@@ -54,7 +54,9 @@ async function tickersToRefresh(): Promise<string[]> {
     }),
   ]);
 
-  const benchmarks = [...new Set(portfolios.map((p) => p.benchmarkTicker).filter(Boolean))];
+  const benchmarks = [
+    ...new Set(portfolios.map((p) => p.benchmarkTicker).filter(Boolean)),
+  ];
   for (const ticker of benchmarks) {
     await prisma.marketInstrument.upsert({
       where: { ticker },
@@ -91,7 +93,7 @@ export async function refreshPrices(): Promise<RefreshReport> {
   const snapshot = await fetchSnapshots(tickers);
   for (const e of snapshot.errors) {
     report.errors.push(
-      `${e.rateLimited ? "Rate limited" : "Failed"} on ${e.batch.length} tickers: ${e.message}`
+      `${e.rateLimited ? "Rate limited" : "Failed"} on ${e.batch.length} tickers: ${e.message}`,
     );
   }
 
@@ -120,23 +122,29 @@ export async function refreshPrices(): Promise<RefreshReport> {
 
     pricedTickers.add(ticker);
     report.priced += 1;
-    if (row.providerAsOf && (!report.oldestPriceAt || row.providerAsOf < report.oldestPriceAt)) {
+    if (
+      row.providerAsOf &&
+      (!report.oldestPriceAt || row.providerAsOf < report.oldestPriceAt)
+    ) {
       report.oldestPriceAt = row.providerAsOf;
     }
   }
 
-
   // NAV FALLBACK. Only for what the primary provider could not price, so it
   // costs a handful of requests. Interval and private funds (PRIVX, ARKVX) have
   // no exchange quote and would otherwise read "—" forever.
-  const stillUnpriced = tickers.filter((t) => !pricedTickers.has(t.toUpperCase()));
+  const stillUnpriced = tickers.filter(
+    (t) => !pricedTickers.has(t.toUpperCase()),
+  );
   const navCandidates = stillUnpriced.filter(navEligible);
   if (navCandidates.length > 0) {
     const known = await prisma.marketInstrument.findMany({
       where: { ticker: { in: navCandidates } },
       select: { ticker: true, navAssetClass: true },
     });
-    const classByTicker = new Map(known.map((k) => [k.ticker, k.navAssetClass]));
+    const classByTicker = new Map(
+      known.map((k) => [k.ticker, k.navAssetClass]),
+    );
 
     for (const ticker of navCandidates) {
       const quote = await fetchNav(ticker, classByTicker.get(ticker));
@@ -154,13 +162,20 @@ export async function refreshPrices(): Promise<RefreshReport> {
       pricedTickers.add(ticker);
       report.priced += 1;
       report.pricedByNav += 1;
-      if (quote.asOf && (!report.oldestPriceAt || quote.asOf < report.oldestPriceAt)) {
+      if (
+        quote.asOf &&
+        (!report.oldestPriceAt || quote.asOf < report.oldestPriceAt)
+      ) {
         report.oldestPriceAt = quote.asOf;
       }
       // Fill a blank company name from the fund's own reported name.
       if (quote.name) {
         await prisma.managedPosition.updateMany({
-          where: { companyName: null, deletedAt: null, legs: { some: { marketTicker: ticker } } },
+          where: {
+            companyName: null,
+            deletedAt: null,
+            legs: { some: { marketTicker: ticker } },
+          },
           data: { companyName: quote.name },
         });
       }
@@ -212,7 +227,7 @@ export async function refreshPrices(): Promise<RefreshReport> {
       report.positionsRecomputed += 1;
     } catch (err) {
       report.errors.push(
-        `Recompute failed for ${id}: ${err instanceof Error ? err.message : String(err)}`
+        `Recompute failed for ${id}: ${err instanceof Error ? err.message : String(err)}`,
       );
     }
   }
@@ -256,7 +271,13 @@ export async function priceAsOf(portfolioId?: string): Promise<Date | null> {
       lastPriceAt: { not: null },
       active: true,
       ...(portfolioId
-        ? { legs: { some: { position: { portfolioId, status: "OPEN", deletedAt: null } } } }
+        ? {
+            legs: {
+              some: {
+                position: { portfolioId, status: "OPEN", deletedAt: null },
+              },
+            },
+          }
         : {}),
     },
     select: { lastPriceAt: true },

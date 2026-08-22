@@ -19,13 +19,15 @@ export const MAIN_PORTFOLIO_NAME = "Main Portfolio";
  * iframe on a marketing page.
  */
 export function slugify(input: string): string {
-  return input
-    .toLowerCase()
-    .normalize("NFKD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 60) || "portfolio";
+  return (
+    input
+      .toLowerCase()
+      .normalize("NFKD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 60) || "portfolio"
+  );
 }
 
 /**
@@ -35,7 +37,7 @@ export function slugify(input: string): string {
  */
 async function uniqueSlug(
   base: string,
-  isTaken: (slug: string) => Promise<boolean>
+  isTaken: (slug: string) => Promise<boolean>,
 ): Promise<string> {
   const root = slugify(base);
   let candidate = root;
@@ -48,14 +50,24 @@ async function uniqueSlug(
 }
 
 export async function uniquePortfolioSlug(base: string): Promise<string> {
-  return uniqueSlug(base, async (slug) =>
-    !!(await prisma.managedPortfolio.findUnique({ where: { slug }, select: { id: true } }))
+  return uniqueSlug(
+    base,
+    async (slug) =>
+      !!(await prisma.managedPortfolio.findUnique({
+        where: { slug },
+        select: { id: true },
+      })),
   );
 }
 
 export async function uniqueServiceSlug(base: string): Promise<string> {
-  return uniqueSlug(base, async (slug) =>
-    !!(await prisma.service.findUnique({ where: { slug }, select: { id: true } }))
+  return uniqueSlug(
+    base,
+    async (slug) =>
+      !!(await prisma.service.findUnique({
+        where: { slug },
+        select: { id: true },
+      })),
   );
 }
 
@@ -64,7 +76,10 @@ export async function uniqueServiceSlug(base: string): Promise<string> {
  * Idempotent on pubCode, so it is safe to call from the import, a seed script or
  * a form handler.
  */
-export async function ensureService(pubCodeInput: string, opts?: { name?: string }) {
+export async function ensureService(
+  pubCodeInput: string,
+  opts?: { name?: string },
+) {
   const pubCode = resolvePubCode(pubCodeInput);
   const existing = await prisma.service.findUnique({ where: { pubCode } });
   if (existing) return existing;
@@ -137,7 +152,7 @@ export async function ensureMainPortfolio(serviceId: string) {
  * restriction (app-level), otherwise it narrows to the caller's portfolios.
  */
 export async function listServicesWithPortfolios(
-  scopeFilter: Record<string, unknown> | null
+  scopeFilter: Record<string, unknown> | null,
 ) {
   const services = await prisma.service.findMany({
     where: scopeFilter ? { portfolios: { some: scopeFilter } } : undefined,

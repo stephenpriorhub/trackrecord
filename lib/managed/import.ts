@@ -22,9 +22,19 @@
 import { prisma } from "../prisma";
 import { airtableFetch, TABLES } from "../airtable";
 import { dec, type D } from "../money";
-import { AIRTABLE_TO_PUB_CODE, PUB_NAMES, resolvePubCode } from "../publications";
-import { ensureService, createPortfolio, MAIN_PORTFOLIO_NAME } from "./portfolios";
+import {
+  AIRTABLE_TO_PUB_CODE,
+  PUB_NAMES,
+  resolvePubCode,
+} from "../publications";
+import {
+  ensureService,
+  createPortfolio,
+  MAIN_PORTFOLIO_NAME,
+} from "./portfolios";
 import { createPosition, type LegInput } from "./positions";
+import { resolveWarRoomOwner } from "./war-room-owners";
+import { guruSlugs, soleEditor } from "./gurus";
 
 /** The Trade Group table. Not in lib/airtable.ts TABLES because only the import needs it. */
 const TRADE_GROUP_TABLE = "tbl80YmMPJzACPX7b";
@@ -82,11 +92,15 @@ function positiveOrNull(v: any): D | null {
 function airtableCodeFor(pubCode: string): string {
   const real = resolvePubCode(pubCode);
   return (
-    Object.keys(AIRTABLE_TO_PUB_CODE).find((k) => AIRTABLE_TO_PUB_CODE[k] === real) ?? real
+    Object.keys(AIRTABLE_TO_PUB_CODE).find(
+      (k) => AIRTABLE_TO_PUB_CODE[k] === real,
+    ) ?? real
   );
 }
 
-async function fetchTradeGroupNames(): Promise<Map<string, { name: string; sort: number | null }>> {
+async function fetchTradeGroupNames(): Promise<
+  Map<string, { name: string; sort: number | null }>
+> {
   const rows = await airtableFetch(TRADE_GROUP_TABLE, {});
   const map = new Map<string, { name: string; sort: number | null }>();
   for (const r of rows) {
@@ -94,7 +108,10 @@ async function fetchTradeGroupNames(): Promise<Map<string, { name: string; sort:
     if (typeof n === "string" && n.trim()) {
       map.set(r.id, {
         name: n.trim(),
-        sort: typeof r.fields["Sort Order"] === "number" ? r.fields["Sort Order"] : null,
+        sort:
+          typeof r.fields["Sort Order"] === "number"
+            ? r.fields["Sort Order"]
+            : null,
       });
     }
   }
@@ -118,12 +135,12 @@ async function fetchPub(pubCode: string) {
     positions.push(
       ...(await airtableFetch(TABLES.positions, {
         filterByFormula: `FIND("${pName}", ARRAYJOIN({Portfolio Name (from Portfolio)}))`,
-      }))
+      })),
     );
     trades.push(
       ...(await airtableFetch(TABLES.trades, {
         filterByFormula: `FIND("${pName}", ARRAYJOIN({Portfolio (from Parent Position)}))`,
-      }))
+      })),
     );
   }
 
@@ -142,10 +159,8 @@ async function fetchPub(pubCode: string) {
 
 export async function planImport(pubCode: string): Promise<ImportPlan> {
   const real = resolvePubCode(pubCode);
-  const [groups, { portfolioNames, positions, tradesByPosition }] = await Promise.all([
-    fetchTradeGroupNames(),
-    fetchPub(real),
-  ]);
+  const [groups, { portfolioNames, positions, tradesByPosition }] =
+    await Promise.all([fetchTradeGroupNames(), fetchPub(real)]);
 
   const existing = new Set(
     (
@@ -153,7 +168,7 @@ export async function planImport(pubCode: string): Promise<ImportPlan> {
         where: { airtableId: { not: null } },
         select: { airtableId: true },
       })
-    ).map((p) => p.airtableId!)
+    ).map((p) => p.airtableId!),
   );
 
   const buckets = new Map<string, PlannedPortfolio>();
@@ -164,7 +179,10 @@ export async function planImport(pubCode: string): Promise<ImportPlan> {
     const tradeLinks = tradesByPosition.get(pos.id) ?? [];
     const tradable = tradeLinks.filter(isTradableTrade);
     if (tradable.length === 0) {
-      skipped.set("no stock or option trades", (skipped.get("no stock or option trades") ?? 0) + 1);
+      skipped.set(
+        "no stock or option trades",
+        (skipped.get("no stock or option trades") ?? 0) + 1,
+      );
       continue;
     }
     if (!pos.fields["Open Date"]) {
@@ -192,16 +210,20 @@ export async function planImport(pubCode: string): Promise<ImportPlan> {
   }
 
   const list = [...buckets.values()].sort(
-    (a, b) => (a.sortOrder ?? 9999) - (b.sortOrder ?? 9999) || b.positions - a.positions
+    (a, b) =>
+      (a.sortOrder ?? 9999) - (b.sortOrder ?? 9999) ||
+      b.positions - a.positions,
   );
 
   if (list.length > 20) {
     warnings.push(
-      `${list.length} portfolios would be created. If Trade Group is being used for something other than portfolios in this service, merge or drop them before committing.`
+      `${list.length} portfolios would be created. If Trade Group is being used for something other than portfolios in this service, merge or drop them before committing.`,
     );
   }
   if (portfolioNames.length === 0) {
-    warnings.push(`No Airtable portfolio carries Pub Code "${airtableCodeFor(real)}".`);
+    warnings.push(
+      `No Airtable portfolio carries Pub Code "${airtableCodeFor(real)}".`,
+    );
   }
 
   return {
@@ -210,7 +232,10 @@ export async function planImport(pubCode: string): Promise<ImportPlan> {
     airtablePortfolios: portfolioNames,
     portfolios: list,
     totalPositions: list.reduce((n, b) => n + b.positions, 0),
-    skipped: [...skipped.entries()].map(([reason, count]) => ({ reason, count })),
+    skipped: [...skipped.entries()].map(([reason, count]) => ({
+      reason,
+      count,
+    })),
     warnings,
   };
 }
@@ -250,7 +275,7 @@ export interface CommitReport {
 
 export async function commitImport(
   pubCode: string,
-  opts: CommitOptions = {}
+  opts: CommitOptions = {},
 ): Promise<CommitReport> {
   const real = resolvePubCode(pubCode);
   const report: CommitReport = {
@@ -283,7 +308,9 @@ export async function commitImport(
       continue;
     }
 
-    const tradable = (tradesByPosition.get(pos.id) ?? []).filter(isTradableTrade);
+    const tradable = (tradesByPosition.get(pos.id) ?? []).filter(
+      isTradableTrade,
+    );
     if (tradable.length === 0 || !pos.fields["Open Date"]) {
       report.positionsSkipped += 1;
       continue;
@@ -315,7 +342,13 @@ export async function commitImport(
     }
 
     try {
-      await importOnePosition(pos, tradable, portfolioId, opts.actorEmail ?? null);
+      await importOnePosition(
+        pos,
+        tradable,
+        portfolioId,
+        opts.actorEmail ?? null,
+        real,
+      );
       report.positionsCreated += 1;
     } catch (err) {
       report.errors.push({
@@ -339,10 +372,12 @@ async function importOnePosition(
   pos: any,
   trades: any[],
   portfolioId: string,
-  actorEmail: string | null
+  actorEmail: string | null,
+  pubCode: string,
 ) {
   const opens = trades.filter(
-    (t) => (name(t.fields["To Open or Close"]) ?? "Open").toLowerCase() === "open"
+    (t) =>
+      (name(t.fields["To Open or Close"]) ?? "Open").toLowerCase() === "open",
   );
   if (opens.length === 0) throw new Error("no opening trade");
 
@@ -351,8 +386,12 @@ async function importOnePosition(
   for (const t of opens) {
     const sym = String(t.fields["SYMBOL"]).trim().toUpperCase();
     const prev = bySymbol.get(sym);
-    const date = t.fields["Trade Date"] ? Date.parse(t.fields["Trade Date"]) : 0;
-    const prevDate = prev?.fields["Trade Date"] ? Date.parse(prev.fields["Trade Date"]) : Infinity;
+    const date = t.fields["Trade Date"]
+      ? Date.parse(t.fields["Trade Date"])
+      : 0;
+    const prevDate = prev?.fields["Trade Date"]
+      ? Date.parse(prev.fields["Trade Date"])
+      : Infinity;
     if (!prev || date < prevDate) bySymbol.set(sym, t);
   }
 
@@ -360,11 +399,18 @@ async function importOnePosition(
   for (const [sym, t] of bySymbol) {
     const price = numOrNull(t.fields["Trade Price"]);
     if (!price) continue;
-    const isOption = /^[A-Z]+\d{6}[CP]\d{6,8}$/.test(sym.replace(/[^A-Z0-9]/g, ""));
-    const side = (name(t.fields["Action"]) ?? "Buy").toLowerCase() === "sell" ? "SELL" : "BUY";
+    const isOption = /^[A-Z]+\d{6}[CP]\d{6,8}$/.test(
+      sym.replace(/[^A-Z0-9]/g, ""),
+    );
+    const side =
+      (name(t.fields["Action"]) ?? "Buy").toLowerCase() === "sell"
+        ? "SELL"
+        : "BUY";
 
     if (isOption) {
-      const m = sym.replace(/[^A-Z0-9]/g, "").match(/^([A-Z]+)(\d{2})(\d{2})(\d{2})([CP])(\d{6,8})$/);
+      const m = sym
+        .replace(/[^A-Z0-9]/g, "")
+        .match(/^([A-Z]+)(\d{2})(\d{2})(\d{2})([CP])(\d{6,8})$/);
       if (!m) continue;
       legs.push({
         kind: "OPTION",
@@ -401,12 +447,13 @@ async function importOnePosition(
     source: "AIRTABLE_IMPORT",
     airtableId: pos.id,
     actorEmail,
+    guruSlug: resolveOwner(pos, pubCode, bySymbol),
   });
 
   // Replay the exit, if there was one, through the normal close path so the
   // cached figures are computed the same way as a hand-entered close.
   const closes = trades.filter(
-    (t) => (name(t.fields["To Open or Close"]) ?? "").toLowerCase() === "close"
+    (t) => (name(t.fields["To Open or Close"]) ?? "").toLowerCase() === "close",
   );
   if (closes.length > 0 && pos.fields["Close Date"]) {
     const { closePosition } = await import("./positions");
@@ -418,8 +465,10 @@ async function importOnePosition(
     for (const leg of dbLegs) {
       const match = closes.find(
         (t) =>
-          String(t.fields["SYMBOL"]).replace(/[^A-Z0-9]/g, "").toUpperCase() ===
-          leg.marketTicker.replace(/[^A-Z0-9]/g, "").replace(/^O/, "")
+          String(t.fields["SYMBOL"])
+            .replace(/[^A-Z0-9]/g, "")
+            .toUpperCase() ===
+          leg.marketTicker.replace(/[^A-Z0-9]/g, "").replace(/^O/, ""),
       );
       const p = numOrNull(match?.fields["Trade Price"]);
       if (p) prices[leg.id] = p.abs();
@@ -435,6 +484,40 @@ async function importOnePosition(
   }
 
   return created;
+}
+
+/**
+ * Who made this pick.
+ *
+ * Airtable's per-trade PERSON, rolled up onto the position as "Position Guru(s)",
+ * is the base's own record and comes first. Note this is NOT "Reporting Guru(s)",
+ * which is a formula that falls back to the portfolio's editor list and so
+ * reports "Bryan, Karim" for anything unattributed — the exact false pairing this
+ * app exists to avoid.
+ *
+ * For the War Room the verified workbook then fills Airtable's blanks, through
+ * the same shared module the sync uses.
+ */
+function resolveOwner(
+  pos: any,
+  pubCode: string,
+  bySymbol: Map<string, any>,
+): string | null {
+  // Airtable's per-trade PERSON, rolled up onto the position. NOT
+  // "Reporting Guru(s)", which falls back to the portfolio's editor list and so
+  // reports both editors for anything unattributed — the false pairing this app
+  // exists to avoid.
+  const named = guruSlugs(pos.fields["Position Guru(s)"]);
+
+  if (pubCode === "WAR") {
+    const symbols = [...bySymbol.keys()];
+    const openDate = pos.fields["Open Date"]
+      ? new Date(pos.fields["Open Date"])
+      : null;
+    return resolveWarRoomOwner(symbols, openDate, named);
+  }
+  // Elsewhere an ambiguous rollup is left unattributed rather than guessed.
+  return named.length === 1 ? named[0] : null;
 }
 
 /**

@@ -4,71 +4,10 @@ import { after } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { airtableFetch, TABLES, classifyInvestmentType, detectSpreadType } from '@/lib/airtable'
 import { AIRTABLE_PUB_CODES, AIRTABLE_TO_PUB_CODE, PUB_NAMES, resolvePubCode } from '@/lib/publications'
-import warRoomOwners from '@/data/warRoomOwners.json'
+// One shared implementation with the Portfolio Manager import — two copies of an
+// attribution rule drift, and that is the bug class this app keeps repeating.
+import { resolveWarRoomOwner } from '@/lib/managed/war-room-owners'
 
-
-// Verified War Room owner map, generated from the manually-maintained track-record
-// workbook (every sheet's B/K column) by scripts/build-war-room-owners.py. All 8,846
-// harvested rows carry exactly one owner and none of the 21 overlapping sheet cuts
-// contradicts another — Bryan and Karim never co-own a War Room pick, which makes this
-// workbook the authority on who made each one.
-//   occ    — exact option contract: "TICKER|YYMMDD|C/P|STRIKE"   (2,366 keys, no conflicts)
-//   dated  — underlying ticker + open date: "TICKER@YYYY-MM-DD"  (3,235 keys, no conflicts)
-//   ticker — bare ticker, last owner to trade it                  (436 keys, ambiguous)
-// Covers 96% of War Room positions (3,193 of 3,313); the rest are trades opened since the
-// last export, which is why Airtable's Trade Guru stays in the chain below it.
-const WAR_ROOM_OWNERS = warRoomOwners as {
-  occ: Record<string, string>
-  dated: Record<string, string>
-  ticker: Record<string, string>
-}
-
-// Normalize an Airtable SYMBOL to the key format used in warRoomOwners.json:
-// options -> "TICKER|YYMMDD|C/P|STRIKE" (strike as integer), otherwise the bare ticker.
-function ownerKeyFromSymbol(symbol: unknown): string | null {
-  if (typeof symbol !== 'string') return null
-  const s = symbol.toUpperCase().replace(/[^A-Z0-9]/g, '')
-  if (!s) return null
-  const m = s.match(/^([A-Z]+)(\d{6})([CP])(\d{6,8})/)
-  if (m) return `${m[1]}|${m[2]}|${m[3]}|${parseInt(m[4], 10)}`
-  return s
-}
-
-// Look a War Room position up in the verified workbook.
-//
-// `exact` matches an option contract or an underlying+open-date pair — both unambiguous,
-// so they outrank Airtable. `loose` matches the bare ticker, which only records the LAST
-// owner to trade that ticker; on multi-year LEAPS rolls it can name the wrong editor, so
-// it sits BELOW Airtable's per-trade Trade Guru and is a last resort before the default.
-function warRoomOwnerFor(
-  symbols: string[],
-  openDate: unknown,
-  tier: 'exact' | 'loose',
-): string | null {
-  const keys = symbols.map(ownerKeyFromSymbol).filter((k): k is string => !!k)
-
-  if (tier === 'loose') {
-    for (const k of keys) {
-      if (!k.includes('|') && WAR_ROOM_OWNERS.ticker[k]) return WAR_ROOM_OWNERS.ticker[k]
-    }
-    return null
-  }
-
-  for (const k of keys) {
-    if (k.includes('|') && WAR_ROOM_OWNERS.occ[k]) return WAR_ROOM_OWNERS.occ[k]
-  }
-  const day = openDate instanceof Date && !isNaN(openDate.getTime())
-    ? openDate.toISOString().slice(0, 10)
-    : null
-  if (day) {
-    for (const k of keys) {
-      // `dated` is keyed by the underlying ticker, so an option key matches on its root.
-      const owner = WAR_ROOM_OWNERS.dated[`${k.split('|')[0]}@${day}`]
-      if (owner) return owner
-    }
-  }
-  return null
-}
 
 // How many positions to process against Postgres at once. The heavy work is DB writes,
 // so a modest concurrency turns a ~10k-record sequential crawl into a job that finishes
@@ -80,15 +19,16 @@ const GURU_NAMES: Record<string, { slug: string; name: string }> = {
   'Bryan Bottarelli': { slug: 'bryan', name: 'Bryan Bottarelli' },
   'Karim Rahemtulla': { slug: 'karim', name: 'Karim Rahemtulla' },
   'Nate Bear': { slug: 'nate', name: 'Nate Bear' },
-  'George': { slug: 'george', name: 'George' },
   'Matt McCall': { slug: 'matt', name: 'Matt McCall' },
 }
 
-// War Room is single-owner per position: Bryan and Karim never co-own a pick, so a WAR or
-// PMK position resolves to exactly one guru and never to a Bryan+Karim pair. Trend Advisory
-// (TPU) is still co-managed here — pending a verified TPU owner sheet, a position with no
-// per-trade owner falls back to both editors.
-const SINGLE_OWNER_PUBS = new Set(['WAR', 'PMK'])
+// Publications where a position has exactly ONE owner. The War Room is the case that
+// matters: Bryan and Karim never co-own a pick, so a WAR position must never resolve to a
+// Bryan+Karim pair. The rest are single-guru services (Matt, Nate, Bryan) where a pair
+// would be meaningless anyway. Trend Advisory (TPU) is genuinely co-managed and is
+// deliberately absent — pending a verified TPU owner sheet, a position with no per-trade
+// owner there still falls back to both editors.
+const SINGLE_OWNER_PUBS = new Set(['WAR', 'PMK', 'XAI', 'NBS', 'PSU', 'DPL'])
 
 // Airtable's "Reporting Guru(s)" field (and the underlying editor fields) are wildly
 // inconsistent across the three services: initials ('B', 'K'), first names ('Bryan'),
@@ -98,7 +38,10 @@ const GURU_ALIASES: Record<string, string> = {
   b: 'bryan', bryan: 'bryan', 'bryan bottarelli': 'bryan', bottarelli: 'bryan',
   k: 'karim', karim: 'karim', 'karim rahemtulla': 'karim', rahemtulla: 'karim',
   n: 'nate', nate: 'nate', 'nate bear': 'nate', bear: 'nate',
-  george: 'george', // War Room analyst tracked as his own guru (distinct from "Neil George")
+  // "George" appears as a PERSON on ~58 War Room trades but is deliberately NOT
+  // a guru: Stephen does not want him surfaced. Leaving him unmapped makes those
+  // positions fall through to the verified workbook, which assigns the Bryan or
+  // Karim the published Bryan-and-Karim-only record already credits.
   m: 'matt', matt: 'matt', 'matt mccall': 'matt', mccall: 'matt',
 }
 
@@ -195,6 +138,9 @@ async function syncPub(airtableCode: string) {
         WAR: ['bryan', 'karim'], // The War Room — Bryan & Karim (each pick owned by one of them)
         PMK: ['bryan'],          // Post-Market Profits — Bryan Bottarelli only
         XAI: ['matt'],           // McCall Innovation Report — Matt McCall only
+        NBS: ['nate'],           // Nate Bear's Sector Strike
+        PSU: ['nate'],           // Profit Surge Trader
+        DPL: ['nate'],           // Daily Profits Live
       }
 
       const guruDbIds = (pubGuruMap[pubCode] || [])
@@ -319,17 +265,15 @@ async function syncPub(airtableCode: string) {
           owners.sort((a, b) => (counts.get(b)! - counts.get(a)!) || (firstDate.get(a)! - firstDate.get(b)!))
 
           const symbols: string[] = pubCode === 'WAR'
-            ? [
-                ...(Array.isArray(positionData.symbols) ? positionData.symbols : []),
-                ...posTradeRecords.map((t: any) => t.fields['SYMBOL']).filter(Boolean),
-              ]
-            : []
-          const ownerSlug =
-            (symbols.length ? warRoomOwnerFor(symbols, positionData.openDate, 'exact') : null)
-            ?? owners[0]
-            ?? (symbols.length ? warRoomOwnerFor(symbols, positionData.openDate, 'loose') : null)
-            ?? 'bryan'
-          finalGuruIds = [guruIdBySlug[ownerSlug]].filter(Boolean)
+          ? [
+              ...(Array.isArray(positionData.symbols) ? positionData.symbols : []),
+              ...posTradeRecords.map((t: any) => t.fields['SYMBOL']).filter(Boolean),
+            ]
+          : []
+        const ownerSlug = pubCode === 'WAR'
+          ? resolveWarRoomOwner(symbols, positionData.openDate, owners)
+          : (owners[0] ?? 'bryan')
+        finalGuruIds = [guruIdBySlug[ownerSlug]].filter(Boolean)
         } else {
           const resolvedSlugs = reportingGuruSlugs(pf['Reporting Guru(s)'])
           const linkGuruIds = resolvedSlugs.map(s => guruIdBySlug[s]).filter(Boolean)
