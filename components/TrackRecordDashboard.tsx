@@ -9,6 +9,7 @@ const GURU_OPTIONS = [
   { value: 'karim', label: 'Karim Rahemtulla' },
   { value: 'nate', label: 'Nate Bear' },
   { value: 'george', label: 'George' },
+  { value: 'matt', label: 'Matt McCall' },
 ]
 
 const TYPE_OPTIONS = [
@@ -86,6 +87,15 @@ function getSpreadReason(spreadType: string, posName: string): string {
 function returnColor(r: number | null | undefined) {
   if (r === null || r === undefined) return 'text-gray-400'
   return r >= 0 ? 'text-green-400' : 'text-red-400'
+}
+
+// A publication can hold several portfolios under one code — XAI covers both "The McCall
+// Letter" and the "Disruptor 25 Portfolio" — so name the book when it differs from the
+// publication itself, and just the publication when it doesn't.
+function portfolioLabel(portfolio: any): string {
+  const pub = pubName(portfolio?.pubCode ?? '')
+  const book = portfolio?.name
+  return book && book !== pub ? `${pub} — ${book}` : pub
 }
 
 // stats route returns values already converted to % (e.g. 18.0 for 18%)
@@ -449,7 +459,7 @@ export default function TrackRecordDashboard() {
                       </td>
                       <td className="px-4 py-3">
                         <span
-                          title={pubName(pos.portfolio?.pubCode ?? '')}
+                          title={portfolioLabel(pos.portfolio)}
                           className="text-xs bg-gray-800 text-gray-300 px-2 py-0.5 rounded cursor-help"
                         >
                           {resolvePubCode(pos.portfolio?.pubCode ?? '')}
@@ -552,7 +562,7 @@ function DrillDownModal({ position, onClose }: { position: any; onClose: () => v
           <div>
             <h2 className="text-lg sm:text-xl font-bold text-white">{position.name}</h2>
             <div className="text-sm text-gray-400 mt-1">
-              {(position.symbols || []).join(', ')} · {pubName(position.portfolio?.pubCode ?? '')}
+              {(position.symbols || []).join(', ')} · {portfolioLabel(position.portfolio)}
               {position.gurus?.length > 0 && ` · ${position.gurus.map((g: any) => g.guru.name).join(', ')}`}
               {' · '}{position.investmentType}
             </div>
