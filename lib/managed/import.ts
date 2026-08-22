@@ -177,16 +177,9 @@ export async function planImport(pubCode: string): Promise<ImportPlan> {
 
   for (const pos of positions) {
     const tradeLinks = tradesByPosition.get(pos.id) ?? [];
-    const tradable = tradeLinks.filter(isTradableTrade);
-    if (tradable.length === 0) {
-      skipped.set(
-        "no stock or option trades",
-        (skipped.get("no stock or option trades") ?? 0) + 1,
-      );
-      continue;
-    }
-    if (!pos.fields["Open Date"]) {
-      skipped.set("no open date", (skipped.get("no open date") ?? 0) + 1);
+    const reason = skipReason(pos, tradeLinks);
+    if (reason) {
+      skipped.set(reason, (skipped.get(reason) ?? 0) + 1);
       continue;
     }
 
@@ -251,8 +244,33 @@ function isTradableTrade(t: any): boolean {
   const type = (name(t.fields["Investment Type"]) ?? "").toLowerCase();
   if (type === "cash" || type === "dividend") return false;
   if (!t.fields["SYMBOL"]) return false;
-  if (numOrNull(t.fields["Trade Price"]) === null) return false;
-  return true;
+  return positiveOrNull(t.fields["Trade Price"]) !== null;
+}
+
+/**
+ * Why a position could not be imported. Separated because "no trades" and "no
+ * entry price" call for completely different responses: the first is a data
+ * shape this importer does not handle, the second is an incomplete record in
+ * Airtable that somebody has to fill in.
+ *
+ * A position with no entry price is SKIPPED rather than imported at zero. Some
+ * recently-added Profit Surge Trader and Daily Profits Live positions have a
+ * current price but no open price anywhere — not on the trade, not on the
+ * position — and importing those would publish a fabricated return.
+ */
+function skipReason(pos: any, trades: any[]): string | null {
+  if (!pos.fields["Open Date"]) return "no open date";
+
+  const real = trades.filter((t) => {
+    const type = (name(t.fields["Investment Type"]) ?? "").toLowerCase();
+    return type !== "cash" && type !== "dividend" && !!t.fields["SYMBOL"];
+  });
+  if (real.length === 0) return "no stock or option trades";
+
+  if (real.every((t) => positiveOrNull(t.fields["Trade Price"]) === null)) {
+    return "no entry price recorded in Airtable";
+  }
+  return null;
 }
 
 export interface CommitOptions {
@@ -308,13 +326,14 @@ export async function commitImport(
       continue;
     }
 
-    const tradable = (tradesByPosition.get(pos.id) ?? []).filter(
-      isTradableTrade,
-    );
-    if (tradable.length === 0 || !pos.fields["Open Date"]) {
+    const tradeLinks = tradesByPosition.get(pos.id) ?? [];
+    // Same rule as the plan, so a dry run and a commit never disagree about
+    // what is importable.
+    if (skipReason(pos, tradeLinks)) {
       report.positionsSkipped += 1;
       continue;
     }
+    const tradable = tradeLinks.filter(isTradableTrade);
 
     const gid = one(pos.fields["Trade Group"]) ?? null;
     const g = gid ? groups.get(gid) : null;
