@@ -1,12 +1,11 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { NextRequest, NextResponse } from 'next/server'
 import { after } from 'next/server'
-import { PrismaClient } from '@prisma/client'
+import { prisma } from '@/lib/prisma'
 import { airtableFetch, TABLES, classifyInvestmentType, detectSpreadType } from '@/lib/airtable'
 import { AIRTABLE_PUB_CODES, AIRTABLE_TO_PUB_CODE, PUB_NAMES, resolvePubCode } from '@/lib/publications'
 import warRoomOwners from '@/data/warRoomOwners.json'
 
-const prisma = new PrismaClient()
 
 // Verified War Room owner map, generated from the manually-maintained track-record
 // workbook (every sheet's B/K column) by scripts/build-war-room-owners.py. All 8,846

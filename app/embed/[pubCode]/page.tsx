@@ -1,8 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { PrismaClient } from '@prisma/client'
+import { prisma } from '@/lib/prisma'
 import { pubName, resolvePubCode } from '@/lib/publications'
 
-const prisma = new PrismaClient()
 
 export default async function EmbedPage({
   params,

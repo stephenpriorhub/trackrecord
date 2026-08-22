@@ -8,28 +8,29 @@ datasource db {
 }
 
 model Guru {
-  id          String           @id @default(cuid())
+  id          String          @id @default(cuid())
   name        String
-  slug        String           @unique
+  slug        String          @unique
   portfolios  PortfolioGuru[]
   positions   PositionGuru[]
   trades      Trade[]
-  createdAt   DateTime         @default(now())
-  updatedAt   DateTime         @updatedAt
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+  ServiceGuru ServiceGuru[]
 }
 
 model Portfolio {
-  id             String           @id @default(cuid())
-  airtableId     String           @unique
-  pubCode        String
-  name           String
-  businessUnit   String
-  status         String
-  gurus          PortfolioGuru[]
-  positions      Position[]
-  syncLogs       SyncLog[]
-  createdAt      DateTime         @default(now())
-  updatedAt      DateTime         @updatedAt
+  id           String          @id @default(cuid())
+  airtableId   String          @unique
+  pubCode      String
+  name         String
+  businessUnit String
+  status       String
+  gurus        PortfolioGuru[]
+  positions    Position[]
+  syncLogs     SyncLog[]
+  createdAt    DateTime        @default(now())
+  updatedAt    DateTime        @updatedAt
 }
 
 model PortfolioGuru {
@@ -107,4 +108,444 @@ model SyncLog {
   message       String?
   startedAt     DateTime   @default(now())
   completedAt   DateTime?
+}
+
+// ===========================================================================
+//  PORTFOLIO MANAGER
+// ===========================================================================
+// Everything above this line is the READ-ONLY Airtable mirror (the Track
+// Record): the sync in app/api/sync/route.ts owns it and overwrites it freely.
+// Everything below is GURU-AUTHORED and the sync must never touch it.
+//
+// Hierarchy:  Guru -> Service (a publication) -> ManagedPortfolio -> ManagedPosition
+//                  -> ManagedLeg -> ManagedExecution -> ManagedFill
+//
+// A ManagedPortfolio corresponds to what Airtable calls a "Trade Group". A
+// service that doesn't subdivide gets a single portfolio named "Main Portfolio".
+//
+// MONEY IS Decimal(18,6), NOT Float. The Track Record above uses Float because
+// it only ever mirrors someone else's numbers; here the numbers are authored and
+// published, and float residue renders as "-$0.00" and breaks exact comparisons
+// (a position closed at exactly its entry showing a 1e-13 loss).
+
+enum InstrumentKind {
+  STOCK
+  OPTION
+}
+
+enum OptionRight {
+  CALL
+  PUT
+}
+
+/// A leg's OPENING direction. Long = BUY, short = SELL.
+enum LegSide {
+  BUY
+  SELL
+}
+
+enum FillIntent {
+  OPEN
+  CLOSE
+}
+
+enum FillSide {
+  BUY
+  SELL
+}
+
+enum ManagedStatus {
+  OPEN
+  CLOSED
+}
+
+/// Where a row came from. AIRTABLE_IMPORT rows were seeded by the one-time
+/// import; there is NO ongoing Airtable sync for managed data, so after import
+/// they are edited like any other row.
+enum ManagedSource {
+  MANUAL
+  AIRTABLE_IMPORT
+}
+
+/// PRIVATE portfolios 404 on the public embed route.
+enum PortfolioVisibility {
+  PRIVATE
+  PUBLIC
+}
+
+/// Display/labelling only. Mirrors lib/structure.ts classifyStructure().
+enum StructureKind {
+  LONG_STOCK
+  LONG_CALL
+  LONG_PUT
+  VERTICAL_DEBIT
+  VERTICAL_CREDIT
+  STRADDLE
+  STRANGLE
+  BUTTERFLY
+  IRON_CONDOR
+  IRON_BUTTERFLY
+  CUSTOM_DEFINED_RISK
+  UNDEFINED_RISK
+}
+
+/// How a stored price was obtained. NONE means genuinely unpriced — which is
+/// rendered as unpriced, never as zero.
+enum PriceSource {
+  LAST_TRADE
+  PREV_CLOSE
+  MANUAL
+  NONE
+}
+
+/// A publication. `pubCode` matches lib/publications.ts (WAR, PMK, TPU, XAI).
+model Service {
+  id          String  @id @default(cuid())
+  pubCode     String  @unique
+  name        String
+  slug        String  @unique
+  description String?
+  active      Boolean @default(true)
+  sortOrder   Int     @default(0)
+
+  gurus       ServiceGuru[]
+  portfolios  ManagedPortfolio[]
+  assignments PortfolioAssignment[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model ServiceGuru {
+  service   Service @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+  serviceId String
+  guru      Guru    @relation(fields: [guruId], references: [id], onDelete: Cascade)
+  guruId    String
+
+  @@id([serviceId, guruId])
+}
+
+model ManagedPortfolio {
+  id        String  @id @default(cuid())
+  serviceId String
+  service   Service @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+
+  name        String
+  /// Public embed key. Short and stable — renaming a portfolio must not break a
+  /// live iframe, so the slug is set once and only changed deliberately.
+  slug        String              @unique
+  description String?
+  sortOrder   Int                 @default(0)
+  visibility  PortfolioVisibility @default(PRIVATE)
+  archivedAt  DateTime?
+
+  /// Compared against on the embed header. Priced by the same snapshot job.
+  benchmarkTicker String @default("SPY")
+
+  /// Set when this portfolio was seeded from an Airtable Trade Group, so a
+  /// re-run of the import updates rather than duplicates.
+  airtableTradeGroupId String? @unique
+
+  positions   ManagedPosition[]
+  assignments PortfolioAssignment[]
+  changes     ChangeLog[]
+
+  createdByEmail String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@unique([serviceId, name])
+  @@index([serviceId, sortOrder])
+}
+
+/// One trade idea — one row in the embed's table.
+model ManagedPosition {
+  id          String           @id @default(cuid())
+  portfolioId String
+  portfolio   ManagedPortfolio @relation(fields: [portfolioId], references: [id], onDelete: Cascade)
+
+  /// The UNDERLYING symbol, always — one uniform ticker field in the UI, even
+  /// for an option position whose legs carry OCC symbols.
+  underlying  String
+  /// "Private Shares Fund", "Destiny Tech 100" — the embed's Underlying Company
+  /// column. Auto-filled from market data, editable by the guru.
+  companyName String?
+  instrument  InstrumentKind
+  structure   StructureKind
+  /// Human label built at write time ("NVDA 1/16/27 $200 Call", "SPY 550/560
+  /// Call Debit Spread") so lists render without joining legs.
+  label       String
+
+  status   ManagedStatus @default(OPEN)
+  openedAt DateTime
+  closedAt DateTime?
+
+  /// Guidance shown in the embed. Advisory only — nothing is enforced against them.
+  buyUpToPrice  Decimal? @db.Decimal(18, 6)
+  stopLossPrice Decimal? @db.Decimal(18, 6)
+  targetPrice   Decimal? @db.Decimal(18, 6)
+
+  thesis String? @db.Text
+
+  // ---- cached valuation, refreshed by the price cron ----
+  cachedEntryPrice    Decimal?  @db.Decimal(18, 6)
+  cachedCurrentPrice  Decimal?  @db.Decimal(18, 6)
+  cachedReturnPct     Decimal?  @db.Decimal(12, 8)
+  cachedRealizedPnl   Decimal?  @db.Decimal(18, 6)
+  cachedUnrealizedPnl Decimal?  @db.Decimal(18, 6)
+  /// True when at least one leg could not be priced. Surfaced as "unpriced" in
+  /// the UI rather than silently valuing the leg at zero.
+  cachedUnpriced      Boolean   @default(false)
+  cachedAt            DateTime?
+
+  source     ManagedSource @default(MANUAL)
+  /// Airtable Position record id, for import idempotency. Nothing is ever
+  /// written back to Airtable.
+  airtableId String?       @unique
+
+  legs       ManagedLeg[]
+  executions ManagedExecution[]
+  fills      ManagedFill[]
+  comments   ManagedComment[]
+
+  createdByEmail String?
+  updatedByEmail String?
+  deletedAt      DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  @@index([portfolioId, status, openedAt])
+  @@index([underlying])
+  @@index([deletedAt])
+}
+
+model ManagedLeg {
+  id         String          @id @default(cuid())
+  positionId String
+  position   ManagedPosition @relation(fields: [positionId], references: [id], onDelete: Cascade)
+  /// Stable 0-based ordering, for display and close-fill matching.
+  legIndex   Int
+
+  kind         InstrumentKind
+  underlying   String
+  /// STOCK: the plain symbol. OPTION: the OCC symbol built by lib/occ.ts.
+  marketTicker String
+  instrument   MarketInstrument @relation(fields: [marketTicker], references: [ticker], onDelete: Restrict)
+
+  // ---- option-only; all NULL for a stock leg ----
+  expiry DateTime?    @db.Date
+  strike Decimal?     @db.Decimal(18, 6)
+  right  OptionRight?
+
+  side       LegSide
+  /// Contracts per ONE unit of the position (1 for a vertical, 2 for the short
+  /// side of a 1x2). A fill's quantity is in this leg's own contracts.
+  ratio      Int     @default(1)
+  /// 100 for options, 1 for stock. Copied onto each fill so a contract
+  /// adjustment can never silently rewrite closed history.
+  multiplier Int
+
+  // ---- cached leg state, recomputed from fills on every write ----
+  openQty     Int       @default(0)
+  closedQty   Int       @default(0)
+  wavgEntry   Decimal?  @db.Decimal(18, 6)
+  wavgExit    Decimal?  @db.Decimal(18, 6)
+  realizedPnl Decimal   @default(0) @db.Decimal(18, 6)
+  /// A leg that reaches openQty 0 is CLOSED FOREVER; re-entering the same
+  /// contract requires a NEW position. That one rule is what makes
+  /// weighted-average entry unambiguous — see lib/pnl.ts.
+  closedAt    DateTime?
+
+  fills    ManagedFill[]
+  comments ManagedComment[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([positionId, legIndex])
+  @@index([marketTicker])
+}
+
+/// One order: an entry or an exit. Several of these per position is how
+/// "multiple entries and exits" is represented — scaling in adds an OPEN, a
+/// partial exit adds a CLOSE.
+model ManagedExecution {
+  id         String          @id @default(cuid())
+  positionId String
+  position   ManagedPosition @relation(fields: [positionId], references: [id], onDelete: Cascade)
+
+  intent    FillIntent
+  /// Units of the whole position in this order. NULL when a single leg was
+  /// closed on its own.
+  units     Int?
+  /// True when this closed one leg of a multi-leg position independently.
+  leggedOut Boolean    @default(false)
+
+  executedAt DateTime
+  note       String?  @db.Text
+
+  fills    ManagedFill[]
+  comments ManagedComment[]
+
+  createdByEmail String?
+  deletedAt      DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  @@index([positionId, executedAt])
+  @@index([deletedAt])
+}
+
+model ManagedFill {
+  id          String           @id @default(cuid())
+  executionId String
+  execution   ManagedExecution @relation(fields: [executionId], references: [id], onDelete: Cascade)
+  legId       String
+  leg         ManagedLeg       @relation(fields: [legId], references: [id], onDelete: Cascade)
+  positionId  String
+  position    ManagedPosition  @relation(fields: [positionId], references: [id], onDelete: Cascade)
+
+  intent     FillIntent
+  side       FillSide
+  /// Contracts/shares of THIS leg. Always positive.
+  quantity   Int
+  price      Decimal    @db.Decimal(18, 6)
+  /// Copied from the leg at write time — history-proof.
+  multiplier Int
+  /// Signed, computed once at write time and STORED:
+  ///   (side === BUY ? -1 : +1) * price * quantity * multiplier
+  cashFlow   Decimal    @db.Decimal(18, 6)
+
+  executedAt DateTime
+
+  deletedAt DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  @@index([legId, executedAt, createdAt])
+  @@index([positionId])
+  @@index([deletedAt])
+}
+
+/// A guru's note on a position. The embed's Comments column shows the latest
+/// undeleted comment; the full thread is visible in the manager.
+model ManagedComment {
+  id         String          @id @default(cuid())
+  positionId String
+  position   ManagedPosition @relation(fields: [positionId], references: [id], onDelete: Cascade)
+
+  /// Set when the note is about ONE leg rather than the whole position — the
+  /// short side of a spread gets closed for its own reason.
+  legId       String?
+  leg         ManagedLeg?       @relation(fields: [legId], references: [id], onDelete: Cascade)
+  /// Set when the note describes a specific entry or exit.
+  executionId String?
+  execution   ManagedExecution? @relation(fields: [executionId], references: [id], onDelete: SetNull)
+
+  body        String  @db.Text
+  authorEmail String?
+  authorName  String?
+
+  deletedAt DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  @@index([positionId, createdAt])
+  @@index([legId])
+  @@index([deletedAt])
+}
+
+/// Every ticker the price cron needs to fetch: one row per stock symbol, OCC
+/// option symbol and benchmark. Keyed by ticker so a leg and a benchmark
+/// referencing the same symbol share one price.
+model MarketInstrument {
+  ticker     String         @id
+  kind       InstrumentKind
+  underlying String
+  expiry     DateTime?      @db.Date
+  strike     Decimal?       @db.Decimal(18, 6)
+  right      OptionRight?
+
+  /// False once nothing references it any more; kept rather than deleted so
+  /// closed history retains its last known price.
+  active Boolean @default(true)
+
+  lastPrice   Decimal?    @db.Decimal(18, 6)
+  /// The REAL trade time, from last_trade.last_updated — NOT the time the
+  /// provider assembled the snapshot. Using the latter claims 15-minute-old
+  /// data is current, which is exactly what the embed's "last updated" says.
+  lastPriceAt DateTime?
+  priceSource PriceSource @default(NONE)
+  /// Previous session close, the fallback rung of the mark ladder.
+  prevClose   Decimal?    @db.Decimal(18, 6)
+
+  legs ManagedLeg[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([active])
+  @@index([underlying])
+}
+
+/// An OxfordHub user designated to manage EVERY portfolio in the app, whatever
+/// their hub role. This is how a non-admin becomes a portfolio manager.
+model AppManager {
+  id             String   @id @default(cuid())
+  email          String   @unique
+  name           String?
+  createdByEmail String?
+  createdAt      DateTime @default(now())
+}
+
+/// A guru/editor's edit rights. Exactly ONE of serviceId / portfolioId is set:
+/// a service-level grant covers every portfolio in that service (including ones
+/// added later), a portfolio-level grant covers just that one.
+model PortfolioAssignment {
+  id    String  @id @default(cuid())
+  email String
+  name  String?
+
+  serviceId String?
+  service   Service? @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+
+  portfolioId String?
+  portfolio   ManagedPortfolio? @relation(fields: [portfolioId], references: [id], onDelete: Cascade)
+
+  createdByEmail String?
+  createdAt      DateTime @default(now())
+
+  @@unique([email, serviceId])
+  @@unique([email, portfolioId])
+  @@index([email])
+}
+
+/// Backend-only edit history. Saves go live immediately, so this is the record
+/// of who changed what. Never shown publicly.
+model ChangeLog {
+  id       String @id @default(cuid())
+  /// "position.create", "position.close", "portfolio.rename", ...
+  action   String
+  /// Model name plus id of the row that changed.
+  entity   String
+  entityId String
+
+  portfolioId String?
+  portfolio   ManagedPortfolio? @relation(fields: [portfolioId], references: [id], onDelete: SetNull)
+
+  actorEmail String?
+  actorName  String?
+  actorRole  String?
+
+  /// Field-level snapshots. Null on a create / on a delete respectively.
+  before  Json?
+  after   Json?
+  /// Free-text detail for actions a diff doesn't explain on its own.
+  summary String?
+
+  createdAt DateTime @default(now())
+
+  @@index([portfolioId, createdAt(sort: Desc)])
+  @@index([entity, entityId])
+  @@index([createdAt(sort: Desc)])
 }

@@ -4,12 +4,17 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "next build",
+    "build": "prisma generate && next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "typecheck": "tsc --noEmit",
+    "test:authz": "node --import tsx --env-file=.env scripts/test-authz.ts",
+    "test:all": "npm run typecheck && npm run test:authz",
+    "db:migrate": "prisma migrate deploy"
   },
   "dependencies": {
     "@prisma/client": "5.22.0",
+    "decimal.js": "^10.6.0",
     "dotenv": "^17.4.2",
     "next": "16.2.9",
     "react": "19.2.4",
@@ -24,6 +29,7 @@
     "eslint-config-next": "16.2.9",
     "prisma": "5.22.0",
     "tailwindcss": "^4",
+    "tsx": "^4.23.12",
     "typescript": "^5"
   }
 }
