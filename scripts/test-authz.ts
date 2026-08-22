@@ -160,7 +160,7 @@ async function main() {
   console.log("\nstatic");
 
   await check("every exported server action authorizes before mutating", () => {
-    const src = readFileSync(new URL("../app/manage/actions.ts", import.meta.url), "utf8");
+    const src = readFileSync(new URL("../app/(hub)/manage/actions.ts", import.meta.url), "utf8");
     assert.ok(src.startsWith('"use server"'), "actions.ts must be a server module");
 
     const exported = [...src.matchAll(/export async function (\w+)\s*\(/g)].map((m) => m[1]);

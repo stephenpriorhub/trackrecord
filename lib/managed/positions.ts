@@ -35,7 +35,12 @@ export interface LegInput {
   side: "BUY" | "SELL";
   /** Entry price per share / per contract. Always positive. */
   price: D;
-  /** Contracts per unit of the position. 1 unless building a ratio spread. */
+  /**
+   * Contracts of THIS leg per one unit of the position. Stays 1 for a normal
+   * leg; it is 2 only for something like the short side of a 1x2 ratio spread.
+   * This is the SHAPE of the position, not how much of it is held — see
+   * CreatePositionInput.units for that.
+   */
   ratio?: number;
   // option-only
   expiry?: string; // "YYYY-MM-DD"
@@ -50,6 +55,15 @@ export interface CreatePositionInput {
   companyName?: string | null;
   openedAt: Date;
   legs: LegInput[];
+  /**
+   * How many units of the position were opened. Defaults to 1.
+   *
+   * Separate from a leg's `ratio` on purpose: ratio describes the structure and
+   * so belongs in the price arithmetic, while units describes size and must NOT.
+   * Conflating them scaled every displayed price by the size — a $26.40 entry
+   * held in two halves rendered as $52.80.
+   */
+  units?: number;
   buyUpToPrice?: D | null;
   stopLossPrice?: D | null;
   targetPrice?: D | null;
@@ -155,6 +169,7 @@ export async function createPosition(input: CreatePositionInput) {
     await ensureInstrument(tickers[i], underlying, input.legs[i]);
   }
 
+  const units = Math.max(1, Math.floor(input.units ?? 1));
   const instrument = input.legs.every((l) => l.kind === "STOCK") ? "STOCK" : "OPTION";
   const label = buildLabel(underlying, input.legs, structure, tickers);
 
@@ -183,7 +198,7 @@ export async function createPosition(input: CreatePositionInput) {
       data: {
         positionId: created.id,
         intent: "OPEN",
-        units: 1,
+        units,
         executedAt: input.openedAt,
         createdByEmail: input.actorEmail ?? null,
       },
@@ -192,7 +207,9 @@ export async function createPosition(input: CreatePositionInput) {
     for (let i = 0; i < input.legs.length; i += 1) {
       const leg = input.legs[i];
       const multiplier = leg.kind === "OPTION" ? OPTION_MULTIPLIER : STOCK_MULTIPLIER;
-      const quantity = leg.ratio ?? 1;
+      const ratio = leg.ratio ?? 1;
+      // Contracts of this leg = units of the position x this leg's ratio.
+      const quantity = units * ratio;
 
       const createdLeg = await tx.managedLeg.create({
         data: {
@@ -205,7 +222,7 @@ export async function createPosition(input: CreatePositionInput) {
           strike: leg.strike?.toString() ?? null,
           right: leg.kind === "OPTION" ? leg.right : null,
           side: leg.side,
-          ratio: quantity,
+          ratio,
           multiplier,
         },
       });

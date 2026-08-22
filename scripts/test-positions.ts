@@ -100,7 +100,7 @@ async function main() {
       portfolioId: P,
       underlying: "SCALE",
       openedAt: new Date("2026-02-01T00:00:00Z"),
-      legs: [{ kind: "STOCK", side: "BUY", price: dec("100"), ratio: 1 }],
+      legs: [{ kind: "STOCK", side: "BUY", price: dec("100") }],
     });
     created.push(pos.id);
     const leg = await prisma.managedLeg.findFirstOrThrow({ where: { positionId: pos.id } });
@@ -135,7 +135,8 @@ async function main() {
       portfolioId: P,
       underlying: "PART",
       openedAt: new Date("2026-03-01T00:00:00Z"),
-      legs: [{ kind: "STOCK", side: "BUY", price: dec("50"), ratio: 4 }],
+      legs: [{ kind: "STOCK", side: "BUY", price: dec("50") }],
+      units: 4,
     });
     created.push(pos.id);
     const leg = await prisma.managedLeg.findFirstOrThrow({ where: { positionId: pos.id } });
@@ -175,7 +176,7 @@ async function main() {
       portfolioId: P,
       underlying: "OVER",
       openedAt: new Date("2026-03-01T00:00:00Z"),
-      legs: [{ kind: "STOCK", side: "BUY", price: dec("10"), ratio: 1 }],
+      legs: [{ kind: "STOCK", side: "BUY", price: dec("10") }],
     });
     created.push(pos.id);
     const leg = await prisma.managedLeg.findFirstOrThrow({ where: { positionId: pos.id } });

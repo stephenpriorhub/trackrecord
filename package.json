@@ -11,7 +11,8 @@
     "test:authz": "node --import tsx --env-file=.env scripts/test-authz.ts",
     "test:all": "npm run typecheck && npm run test:authz && npm run test:positions",
     "db:migrate": "prisma migrate deploy",
-    "test:positions": "node --import tsx --env-file=.env scripts/test-positions.ts"
+    "test:positions": "node --import tsx --env-file=.env scripts/test-positions.ts",
+    "seed:demo": "node --import tsx --env-file=.env scripts/seed-demo-portfolio.ts"
   },
   "dependencies": {
     "@prisma/client": "5.22.0",
