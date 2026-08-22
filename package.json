@@ -12,7 +12,10 @@
     "test:all": "npm run typecheck && npm run test:authz && npm run test:positions",
     "db:migrate": "prisma migrate deploy",
     "test:positions": "node --import tsx --env-file=.env scripts/test-positions.ts",
-    "seed:demo": "node --import tsx --env-file=.env scripts/seed-demo-portfolio.ts"
+    "seed:demo": "node --import tsx --env-file=.env scripts/seed-demo-portfolio.ts",
+    "import:plan": "node --import tsx --env-file=.env scripts/import-plan.ts",
+    "import:commit": "node --import tsx --env-file=.env scripts/import-commit.ts",
+    "prices": "node --import tsx --env-file=.env scripts/refresh-prices.ts"
   },
   "dependencies": {
     "@prisma/client": "5.22.0",

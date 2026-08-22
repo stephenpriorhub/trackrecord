@@ -105,7 +105,11 @@ export async function refreshPrices(): Promise<RefreshReport> {
         // The provider's own timestamp — the true age of the print. Using our
         // fetch time here would make the embed claim 15-minute-old data is live.
         lastPriceAt: row.providerAsOf ?? null,
-        priceSource: "LAST_TRADE",
+        // Verified against the live API: an OPTION row comes back with a price in
+        // session.close but NO timestamp anywhere — no last_trade, no session
+        // last_updated. That price is the previous close, not a live print, so it
+        // is labelled as such rather than passed off as a current quote.
+        priceSource: row.providerAsOf ? "LAST_TRADE" : "PREV_CLOSE",
         ...(row.prevClose ? { prevClose: row.prevClose.toString() } : {}),
       },
     });

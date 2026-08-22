@@ -52,7 +52,7 @@ export default async function PortfolioEmbed({
               )}
             </p>
           )}
-          <p className="pf-asof">{asOfLine(view.priceAsOf)}</p>
+          <p className="pf-asof">{asOfLine(view.priceAsOf, view.hasPrevClosePricing)}</p>
         </header>
 
         {showOpen && (
@@ -68,10 +68,22 @@ export default async function PortfolioEmbed({
   );
 }
 
-/** "Current price last updated Aug 22, 2026 at 3:42 PM ET · delayed 15 minutes" */
-function asOfLine(at: Date | null): string {
+/**
+ * The freshness line. Three cases, because claiming more than we know is the one
+ * thing this line must never do:
+ *
+ *   timestamped print  -> "Current price last updated <stamp> ET · delayed 15 min"
+ *   previous close only -> says so; on this data plan every option lands here,
+ *                          arriving with a price but no timestamp at all
+ *   nothing priced yet  -> says that plainly
+ */
+function asOfLine(at: Date | null, prevCloseOnly: boolean): string {
   const delay = marketDataDelayMinutes();
-  if (!at) return "Current prices not yet available.";
+  if (!at) {
+    return prevCloseOnly
+      ? "Current prices are the previous session's close."
+      : "Current prices not yet available.";
+  }
   const stamp = at.toLocaleString("en-US", {
     timeZone: "America/New_York",
     month: "short",
@@ -80,7 +92,8 @@ function asOfLine(at: Date | null): string {
     hour: "numeric",
     minute: "2-digit",
   });
-  return `Current price last updated ${stamp} ET · market data delayed ${delay} minutes`;
+  const base = `Current price last updated ${stamp} ET · market data delayed ${delay} minutes`;
+  return prevCloseOnly ? `${base} · some prices are the previous close` : base;
 }
 
 function Pct({ v }: { v: D | null }) {

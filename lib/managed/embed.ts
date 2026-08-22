@@ -61,6 +61,12 @@ export interface EmbedView {
   portfolioReturn: D | null;
   benchmarkReturn: D | null;
   priceAsOf: Date | null;
+  /**
+   * True when at least one shown position is priced from a previous close rather
+   * than a timestamped print — which is every option on the current Massive
+   * plan. The embed says so instead of implying a live quote.
+   */
+  hasPrevClosePricing: boolean;
   options: EmbedOptions;
 }
 
@@ -100,7 +106,11 @@ export async function loadEmbedView(
         include: {
           legs: {
             orderBy: { legIndex: "asc" },
-            include: { instrument: { select: { lastPrice: true, lastPriceAt: true } } },
+            include: {
+              instrument: {
+                select: { lastPrice: true, lastPriceAt: true, priceSource: true },
+              },
+            },
           },
           comments: {
             where: { deletedAt: null },
@@ -219,6 +229,11 @@ export async function loadEmbedView(
     portfolioReturn: meanReturn(shown),
     benchmarkReturn,
     priceAsOf: oldestPriceAt(portfolio.positions),
+    hasPrevClosePricing: portfolio.positions.some(
+      (p) =>
+        p.status === "OPEN" &&
+        p.legs.some((l) => l.openQty > 0 && l.instrument.priceSource === "PREV_CLOSE")
+    ),
     options,
   };
 }
@@ -245,14 +260,19 @@ function netExitPrice(
   return total;
 }
 
-/** Oldest provider timestamp across the open legs actually shown. */
+/**
+ * Oldest provider timestamp across the open legs actually shown. Oldest, not
+ * newest: the stamp is a promise that everything on the page is at least that
+ * fresh. Null when nothing carries a timestamp (an all-options portfolio).
+ */
 function oldestPriceAt(
-  positions: { status: string; legs: { instrument: { lastPriceAt: Date | null } }[] }[]
+  positions: { status: string; legs: { openQty: number; instrument: { lastPriceAt: Date | null } }[] }[]
 ): Date | null {
   let oldest: Date | null = null;
   for (const p of positions) {
     if (p.status !== "OPEN") continue;
     for (const leg of p.legs) {
+      if (leg.openQty <= 0) continue;
       const at = leg.instrument.lastPriceAt;
       if (at && (!oldest || at < oldest)) oldest = at;
     }
