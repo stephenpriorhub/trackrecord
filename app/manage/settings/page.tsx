@@ -34,7 +34,9 @@ export default async function SettingsPage() {
       orderBy: { email: "asc" },
       include: {
         service: { select: { name: true, pubCode: true } },
-        portfolio: { select: { name: true, service: { select: { name: true } } } },
+        portfolio: {
+          select: { name: true, service: { select: { name: true } } },
+        },
       },
     }),
     prisma.service.findMany({
@@ -55,9 +57,9 @@ export default async function SettingsPage() {
         <div className="border-b border-gray-800 px-5 py-4">
           <h2 className="font-semibold">Portfolio managers</h2>
           <p className="mt-1 max-w-prose text-xs text-gray-500">
-            Can manage every portfolio in every service, whatever their OxfordHub role.
-            Super admins always have this. Hub admins do <em>not</em> — they have to be
-            added here like anyone else.
+            Can manage every portfolio in every service, whatever their
+            OxfordHub role. Super admins always have this. Hub admins do{" "}
+            <em>not</em> — they have to be added here like anyone else.
           </p>
         </div>
 
@@ -128,14 +130,17 @@ export default async function SettingsPage() {
         <div className="border-b border-gray-800 px-5 py-4">
           <h2 className="font-semibold">Editors</h2>
           <p className="mt-1 max-w-prose text-xs text-gray-500">
-            A guru assigned to a service can edit every portfolio in it, including ones
-            added later. Assign a single portfolio instead to keep them to just that one.
+            A guru assigned to a service can edit every portfolio in it,
+            including ones added later. Assign a single portfolio instead to
+            keep them to just that one.
           </p>
         </div>
 
         <ul className="divide-y divide-gray-800/60">
           {assignments.length === 0 && (
-            <li className="px-5 py-3 text-sm text-gray-500">No editors assigned yet.</li>
+            <li className="px-5 py-3 text-sm text-gray-500">
+              No editors assigned yet.
+            </li>
           )}
           {assignments.map((a) => (
             <li key={a.id} className="flex items-center gap-3 px-5 py-3">

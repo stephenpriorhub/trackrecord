@@ -23,7 +23,7 @@ export default async function ManageIndex() {
   if (appLevel) await seedServicesFromTrackRecord();
 
   const services = await listServicesWithPortfolios(
-    portfolioScopeFilter(scope) as Record<string, unknown> | null
+    portfolioScopeFilter(scope) as Record<string, unknown> | null,
   );
 
   return (
@@ -35,7 +35,10 @@ export default async function ManageIndex() {
       )}
 
       {services.map((service) => (
-        <section key={service.id} className="rounded-xl border border-gray-800 bg-gray-900">
+        <section
+          key={service.id}
+          className="rounded-xl border border-gray-800 bg-gray-900"
+        >
           <div className="flex flex-wrap items-baseline justify-between gap-2 border-b border-gray-800 px-5 py-4">
             <div>
               <h2 className="font-semibold text-white">{service.name}</h2>
@@ -67,7 +70,11 @@ export default async function ManageIndex() {
                   <p className="mt-0.5 text-xs text-gray-500">
                     {p._count.positions}{" "}
                     {p._count.positions === 1 ? "position" : "positions"} ·{" "}
-                    <span className={p.visibility === "PUBLIC" ? "text-green-500" : ""}>
+                    <span
+                      className={
+                        p.visibility === "PUBLIC" ? "text-green-500" : ""
+                      }
+                    >
                       {p.visibility === "PUBLIC" ? "public embed" : "private"}
                     </span>{" "}
                     · vs {p.benchmarkTicker}

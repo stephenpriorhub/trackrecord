@@ -26,7 +26,8 @@ type Props = {
 const VARIANTS: Record<string, string> = {
   primary: "bg-blue-600 hover:bg-blue-500 text-white",
   quiet: "bg-gray-800 hover:bg-gray-700 text-gray-200 border border-gray-700",
-  danger: "bg-red-900/60 hover:bg-red-900 text-red-200 border border-red-800/60",
+  danger:
+    "bg-red-900/60 hover:bg-red-900 text-red-200 border border-red-800/60",
 };
 
 export default function ActionForm({
@@ -40,7 +41,7 @@ export default function ActionForm({
 }: Props) {
   const [result, submit, pending] = useActionState(
     async (_prev: ActionResult | null, form: FormData) => action(form),
-    null
+    null,
   );
 
   return (
@@ -64,7 +65,7 @@ export default function ActionForm({
           className={`mt-2 text-xs ${result.ok ? "text-green-400" : "text-red-400"}`}
           role="status"
         >
-          {result.ok ? result.message ?? "Saved." : result.error}
+          {result.ok ? (result.message ?? "Saved.") : result.error}
         </p>
       )}
     </form>

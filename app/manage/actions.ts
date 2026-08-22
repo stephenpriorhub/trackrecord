@@ -22,6 +22,8 @@ import {
   type ManageScope,
 } from "@/lib/authz";
 import { createPortfolio, ensureService } from "@/lib/managed/portfolios";
+import { createPosition, closePosition, type LegInput } from "@/lib/managed/positions";
+import { parseDecimal, type D } from "@/lib/money";
 
 export type ActionResult = { ok: true; message?: string } | { ok: false; error: string };
 
@@ -348,4 +350,237 @@ export async function unassignEditorAction(form: FormData): Promise<ActionResult
 
   revalidatePath("/manage/settings");
   return { ok: true, message: `Removed ${before.email}.` };
+}
+
+// ---------------------------------------------------------------- positions
+
+/**
+ * Parse a money field a guru typed. Accepts "$12.50", "12.50", "1,250".
+ * Returns null for blank so an optional field stays unset.
+ */
+function money(v: FormDataEntryValue | null): D | null {
+  return parseDecimal(str(v));
+}
+
+/** A date field. Blank means today, so the fast path is one less decision. */
+function date(v: FormDataEntryValue | null): Date {
+  const s = str(v);
+  if (!s) return new Date();
+  // A bare YYYY-MM-DD is read as UTC midnight, matching how dates are stored and
+  // rendered. Reading it as local time shifts a US afternoon entry to the day before.
+  const d = new Date(`${s}T00:00:00.000Z`);
+  return isNaN(d.getTime()) ? new Date() : d;
+}
+
+/**
+ * Read the leg rows out of the form. The simple path submits no leg fields at
+ * all and gets one stock leg; the options path submits legKind/legSide/... as
+ * parallel arrays, one entry per leg.
+ */
+function readLegs(form: FormData): LegInput[] {
+  const kinds = form.getAll("legKind").map((v) => str(v));
+  if (kinds.length === 0) {
+    const price = money(form.get("entryPrice"));
+    if (!price) throw new Error("Enter an entry price.");
+    return [{ kind: "STOCK", side: "BUY", price }];
+  }
+
+  const sides = form.getAll("legSide").map((v) => str(v));
+  const prices = form.getAll("legPrice").map((v) => str(v));
+  const expiries = form.getAll("legExpiry").map((v) => str(v));
+  const strikes = form.getAll("legStrike").map((v) => str(v));
+  const rights = form.getAll("legRight").map((v) => str(v));
+  const ratios = form.getAll("legRatio").map((v) => str(v));
+
+  const legs: LegInput[] = [];
+  for (let i = 0; i < kinds.length; i += 1) {
+    // A blank price marks an unused leg row the form rendered but nobody filled.
+    const price = parseDecimal(prices[i]);
+    if (!price) continue;
+    const kind = kinds[i] === "OPTION" ? "OPTION" : "STOCK";
+    legs.push({
+      kind,
+      side: sides[i] === "SELL" ? "SELL" : "BUY",
+      price,
+      ratio: Math.max(1, parseInt(ratios[i] || "1", 10) || 1),
+      ...(kind === "OPTION"
+        ? {
+            expiry: expiries[i] || undefined,
+            strike: parseDecimal(strikes[i]) ?? undefined,
+            right: rights[i] === "PUT" ? ("PUT" as const) : ("CALL" as const),
+          }
+        : {}),
+    });
+  }
+  if (legs.length === 0) throw new Error("Enter at least one entry price.");
+  return legs;
+}
+
+export async function createPositionAction(form: FormData): Promise<ActionResult> {
+  const { user, scope } = await actor();
+  const portfolioId = str(form.get("portfolioId"));
+  if (!portfolioId) return { ok: false, error: "Missing portfolio." };
+  if (!(await canManagePortfolio(scope, portfolioId))) return DENIED;
+
+  try {
+    const position = await createPosition({
+      portfolioId,
+      underlying: str(form.get("underlying")),
+      companyName: str(form.get("companyName")) || null,
+      openedAt: date(form.get("openedAt")),
+      legs: readLegs(form),
+      buyUpToPrice: money(form.get("buyUpToPrice")),
+      stopLossPrice: money(form.get("stopLossPrice")),
+      targetPrice: money(form.get("targetPrice")),
+      comment: str(form.get("comment")) || null,
+      actorEmail: user?.email ?? null,
+      actorName: user?.name ?? null,
+    });
+
+    await logChange({
+      action: "position.create",
+      entity: "ManagedPosition",
+      entityId: position.id,
+      portfolioId,
+      actor: user,
+      after: { label: position.label, openedAt: position.openedAt },
+    });
+
+    revalidatePath(`/manage/${portfolioId}`);
+    return { ok: true, message: `Added ${position.label}.` };
+  } catch (err) {
+    // Surface the library's own message: they are written for a guru to read
+    // ("Enter an entry price", "only 1 is open"), not for a developer.
+    return { ok: false, error: err instanceof Error ? err.message : "Could not save." };
+  }
+}
+
+export async function closePositionAction(form: FormData): Promise<ActionResult> {
+  const { user, scope } = await actor();
+  const positionId = str(form.get("positionId"));
+  if (!positionId) return { ok: false, error: "Missing position." };
+
+  const position = await prisma.managedPosition.findUnique({
+    where: { id: positionId },
+    select: { portfolioId: true, label: true, legs: { select: { id: true } } },
+  });
+  if (!position) return { ok: false, error: "Position not found." };
+  if (!(await canManagePortfolio(scope, position.portfolioId))) return DENIED;
+
+  // Prices and quantities arrive as legPrice_<legId> so a multi-leg close can
+  // carry a different price per leg in one submit.
+  const prices: Record<string, D> = {};
+  const quantities: Record<string, number> = {};
+  for (const leg of position.legs) {
+    const p = parseDecimal(str(form.get(`legPrice_${leg.id}`)));
+    if (!p) continue;
+    prices[leg.id] = p;
+    const q = parseInt(str(form.get(`legQty_${leg.id}`)) || "", 10);
+    if (Number.isFinite(q) && q > 0) quantities[leg.id] = q;
+  }
+
+  try {
+    await closePosition({
+      positionId,
+      executedAt: date(form.get("closedAt")),
+      prices,
+      quantities,
+      comment: str(form.get("comment")) || null,
+      actorEmail: user?.email ?? null,
+      actorName: user?.name ?? null,
+    });
+
+    const after = await prisma.managedPosition.findUnique({
+      where: { id: positionId },
+      select: { status: true },
+    });
+
+    await logChange({
+      action: "position.close",
+      entity: "ManagedPosition",
+      entityId: positionId,
+      portfolioId: position.portfolioId,
+      actor: user,
+      after: { status: after?.status },
+      summary: Object.entries(quantities).length ? "Partial exit" : undefined,
+    });
+
+    revalidatePath(`/manage/${position.portfolioId}`);
+    return {
+      ok: true,
+      message: after?.status === "CLOSED" ? "Position closed." : "Partial exit recorded.",
+    };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : "Could not close." };
+  }
+}
+
+export async function addCommentAction(form: FormData): Promise<ActionResult> {
+  const { user, scope } = await actor();
+  const positionId = str(form.get("positionId"));
+  const body = str(form.get("body"));
+  if (!positionId || !body) return { ok: false, error: "Write a comment first." };
+
+  const position = await prisma.managedPosition.findUnique({
+    where: { id: positionId },
+    select: { portfolioId: true },
+  });
+  if (!position) return { ok: false, error: "Position not found." };
+  if (!(await canManagePortfolio(scope, position.portfolioId))) return DENIED;
+
+  const comment = await prisma.managedComment.create({
+    data: {
+      positionId,
+      body,
+      authorEmail: user?.email ?? null,
+      authorName: user?.name ?? null,
+    },
+  });
+
+  await logChange({
+    action: "comment.create",
+    entity: "ManagedComment",
+    entityId: comment.id,
+    portfolioId: position.portfolioId,
+    actor: user,
+    after: { body },
+  });
+
+  revalidatePath(`/manage/${position.portfolioId}`);
+  return { ok: true, message: "Comment added." };
+}
+
+/**
+ * Soft-delete a position. Nothing is hard-deleted: a position may already be on
+ * a public page and the change log has to keep pointing at something.
+ */
+export async function deletePositionAction(form: FormData): Promise<ActionResult> {
+  const { user, scope } = await actor();
+  const positionId = str(form.get("positionId"));
+  if (!positionId) return { ok: false, error: "Missing position." };
+
+  const position = await prisma.managedPosition.findUnique({
+    where: { id: positionId },
+    select: { portfolioId: true, label: true, deletedAt: true },
+  });
+  if (!position) return { ok: false, error: "Position not found." };
+  if (!(await canManagePortfolio(scope, position.portfolioId))) return DENIED;
+
+  const restore = str(form.get("restore")) === "1";
+  await prisma.managedPosition.update({
+    where: { id: positionId },
+    data: { deletedAt: restore ? null : new Date(), updatedByEmail: user?.email ?? null },
+  });
+
+  await logChange({
+    action: restore ? "position.restore" : "position.delete",
+    entity: "ManagedPosition",
+    entityId: positionId,
+    portfolioId: position.portfolioId,
+    actor: user,
+    before: { label: position.label, deletedAt: position.deletedAt },
+  });
+
+  revalidatePath(`/manage/${position.portfolioId}`);
+  return { ok: true, message: restore ? "Restored." : `Removed ${position.label}.` };
 }

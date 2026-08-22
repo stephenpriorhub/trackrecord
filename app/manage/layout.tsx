@@ -12,7 +12,11 @@ export const metadata = { title: "Portfolio Manager" };
  * and each portfolio page verifies that specific portfolio. A layout runs on
  * navigation, not on a direct POST to an action.
  */
-export default async function ManageLayout({ children }: { children: React.ReactNode }) {
+export default async function ManageLayout({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
   const user = await getCurrentHubUser();
   const scope = await getManageScope(user);
 
@@ -46,7 +50,10 @@ export default async function ManageLayout({ children }: { children: React.React
             Portfolios
           </Link>
           {isAppLevel(scope) && (
-            <Link href="/manage/settings" className="text-gray-300 hover:text-white">
+            <Link
+              href="/manage/settings"
+              className="text-gray-300 hover:text-white"
+            >
               People &amp; access
             </Link>
           )}
@@ -78,10 +85,14 @@ function Shell({
       <div className="mx-auto max-w-6xl px-4 py-6 sm:px-6 sm:py-8">
         <header className="mb-8">
           <div className="flex flex-wrap items-baseline justify-between gap-3">
-            <h1 className="text-2xl font-bold sm:text-3xl">Portfolio Manager</h1>
+            <h1 className="text-2xl font-bold sm:text-3xl">
+              Portfolio Manager
+            </h1>
             {who && <span className="text-xs text-gray-500">{who}</span>}
           </div>
-          {nav && <nav className="mt-3 flex flex-wrap gap-4 text-sm">{nav}</nav>}
+          {nav && (
+            <nav className="mt-3 flex flex-wrap gap-4 text-sm">{nav}</nav>
+          )}
         </header>
         {children}
       </div>
