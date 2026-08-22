@@ -1,0 +1,80 @@
+# Refreshes Portfolio Manager prices from Massive (plus the NAV fallback for
+# funds Massive cannot price).
+#
+# Why GitHub Actions and not Railway cron: a Railway cron REPLACES a service's
+# start command, so it needs its own service, and this project is already tight
+# on resources. The job is a single authenticated HTTP call, so it does not need
+# to live next to the app.
+#
+# Cost is trivial: ~90 tickers fit in ONE Massive request (the batch cap is 250),
+# so a run is 1-3 requests.
+#
+# CAVEAT worth knowing: GitHub's scheduler is best-effort and can be delayed
+# under load, and it disables scheduled workflows in a repo with no activity for
+# 60 days. The embed always states the real age of its data, so a missed run
+# shows as a staler timestamp rather than a wrong price — but if this needs to be
+# dependable to the minute, move it to a dedicated Railway cron service.
+name: Refresh portfolio prices
+
+on:
+  schedule:
+    # Every 15 minutes, 13:00-21:45 UTC, Monday-Friday. That window covers US
+    # market hours in BOTH EDT (13:30-20:00) and EST (14:30-21:00), so the
+    # schedule does not need editing twice a year. Runs outside the session are
+    # harmless — they just re-fetch the same last price.
+    - cron: "*/15 13-21 * * 1-5"
+    # Sunday: retire instruments no open position references any more. Without
+    # this the batch grows forever with expired option contracts — it was
+    # fetching 422 tickers to price 90 before the first sweep.
+    - cron: "0 6 * * 0"
+  workflow_dispatch:
+    inputs:
+      retire:
+        description: "Also retire unused instruments"
+        type: boolean
+        default: false
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Refresh prices
+        env:
+          CRON_SECRET: ${{ secrets.TRACKRECORD_CRON_SECRET }}
+        run: |
+          set -euo pipefail
+          if [ -z "${CRON_SECRET:-}" ]; then
+            echo "TRACKRECORD_CRON_SECRET is not set on this repository." >&2
+            exit 1
+          fi
+
+          # The Sunday schedule and a manual run with the box ticked also retire.
+          RETIRE=0
+          if [ "${{ github.event.schedule }}" = "0 6 * * 0" ]; then RETIRE=1; fi
+          if [ "${{ inputs.retire }}" = "true" ]; then RETIRE=1; fi
+
+          URL="https://trackrecord.oxfordhub.app/api/cron/prices"
+          if [ "$RETIRE" = "1" ]; then URL="$URL?retire=1"; fi
+
+          # --fail-with-body so an auth failure or a 5xx fails the job loudly and
+          # still prints what the server said.
+          curl --fail-with-body -sS -X POST \
+            --max-time 280 \
+            -H "x-cron-secret: $CRON_SECRET" \
+            "$URL" | tee /tmp/out.json
+          echo
+
+          # A partial refresh is normal (an illiquid contract has no print), so
+          # the job does not fail on unpriced tickers. It DOES fail if nothing at
+          # all was priced, which is the signal that the key or the feed is down.
+          python3 - <<'PY'
+          import json, sys
+          d = json.load(open("/tmp/out.json"))
+          print(f"requested={d.get('requested')} priced={d.get('priced')} "
+                f"nav={d.get('pricedByNav')} unpriced={d.get('unpricedCount')} "
+                f"recomputed={d.get('positionsRecomputed')} retired={d.get('retired')}")
+          for e in (d.get("errors") or [])[:5]:
+              print("error:", e)
+          if d.get("requested", 0) > 0 and d.get("priced", 0) == 0:
+              sys.exit("Nothing could be priced — check MASSIVE_API_KEY and the feed.")
+          PY
