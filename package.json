@@ -17,7 +17,8 @@
     "import:commit": "node --import tsx --env-file=.env scripts/import-commit.ts",
     "prices": "node --import tsx --env-file=.env scripts/refresh-prices.ts",
     "test:manual": "node --import tsx --env-file=.env scripts/test-manual-price.ts",
-    "backfill:owners": "node --import tsx --env-file=.env scripts/backfill-owners.ts"
+    "backfill:owners": "node --import tsx --env-file=.env scripts/backfill-owners.ts",
+    "repair:tickers": "node --import tsx --env-file=.env scripts/repair-stock-tickers.ts"
   },
   "dependencies": {
     "@prisma/client": "5.22.0",

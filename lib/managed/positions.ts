@@ -78,14 +78,33 @@ export interface CreatePositionInput {
   guruSlug?: string | null;
 }
 
-/** The market ticker a leg prices against: a bare symbol, or an OCC option symbol. */
-function marketTickerFor(underlying: string, leg: LegInput): string {
-  if (leg.kind === "STOCK") return underlying;
+/**
+ * A stock ticker as the market data provider spells it: uppercase, punctuation
+ * KEPT.
+ *
+ * This is not the same string as an OCC root. Berkshire trades as "BRK.B" and
+ * that is what prices; the option root for the same company is "BRKB", letters
+ * only, because that is what the OCC format allows. Using the OCC root to price
+ * the stock silently returns nothing — Berkshire never priced at all until this
+ * was split in two.
+ */
+function normalizeStockTicker(raw: string): string {
+  return raw.trim().toUpperCase().replace(/[^A-Z0-9.\-]/g, "");
+}
+
+/**
+ * The market ticker a leg prices against.
+ *
+ * `ticker` is the provider's spelling (BRK.B) and `occRoot` is the letters-only
+ * form (BRKB) — see normalizeStockTicker for why they differ.
+ */
+function marketTickerFor(ticker: string, occRoot: string, leg: LegInput): string {
+  if (leg.kind === "STOCK") return ticker;
   if (!leg.expiry || !leg.strike || !leg.right) {
     throw new Error("An option leg needs an expiry, a strike and call/put.");
   }
   return buildOcc({
-    underlying,
+    underlying: occRoot,
     expiry: leg.expiry,
     right: leg.right === "CALL" ? "C" : "P",
     // buildOcc multiplies by 1000 internally; a Decimal keeps that exact, but
@@ -148,8 +167,10 @@ export async function createPosition(input: CreatePositionInput) {
   if (input.legs.length === 0)
     throw new Error("A position needs at least one leg.");
 
-  const underlying = normalizeUnderlying(input.underlying);
-  if (!underlying) throw new Error("Enter a ticker symbol.");
+  // Two spellings of the same company, both needed — see normalizeStockTicker.
+  const underlying = normalizeStockTicker(input.underlying);
+  const occRoot = normalizeUnderlying(input.underlying);
+  if (!underlying || !occRoot) throw new Error("Enter a ticker symbol.");
 
   for (const leg of input.legs) {
     if (!leg.price.isFinite() || leg.price.lte(0)) {
@@ -175,7 +196,7 @@ export async function createPosition(input: CreatePositionInput) {
   ];
   const structure = classifyStructure(specs, entryCash, distinctExpiries);
 
-  const tickers = input.legs.map((l) => marketTickerFor(underlying, l));
+  const tickers = input.legs.map((l) => marketTickerFor(underlying, occRoot, l));
   for (let i = 0; i < input.legs.length; i += 1) {
     await ensureInstrument(tickers[i], underlying, input.legs[i]);
   }
