@@ -285,7 +285,15 @@ export interface CommitOptions {
 
 export interface CommitReport {
   pubCode: string;
+  /**
+   * Portfolios this run actually inserted. NOT every portfolio it wrote into —
+   * createPortfolio returns an existing row for a name already present, so a
+   * top-up run touches portfolios without creating any, and reporting those as
+   * "created" reads alarmingly like duplicates were made.
+   */
   portfoliosCreated: string[];
+  /** Portfolios written into, whether newly created or already present. */
+  portfoliosUsed: string[];
   positionsCreated: number;
   positionsSkipped: number;
   errors: { position: string; message: string }[];
@@ -299,6 +307,7 @@ export async function commitImport(
   const report: CommitReport = {
     pubCode: real,
     portfoliosCreated: [],
+    portfoliosUsed: [],
     positionsCreated: 0,
     positionsSkipped: 0,
     errors: [],
@@ -347,6 +356,10 @@ export async function commitImport(
 
     let portfolioId = portfolioByName.get(target);
     if (!portfolioId) {
+      const before = await prisma.managedPortfolio.findUnique({
+        where: { serviceId_name: { serviceId: service.id, name: target } },
+        select: { id: true },
+      });
       const created = await createPortfolio({
         serviceId: service.id,
         name: target,
@@ -357,7 +370,8 @@ export async function commitImport(
       });
       portfolioId = created.id;
       portfolioByName.set(target, portfolioId);
-      report.portfoliosCreated.push(target);
+      report.portfoliosUsed.push(target);
+      if (!before) report.portfoliosCreated.push(target);
     }
 
     try {

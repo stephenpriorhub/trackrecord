@@ -43,6 +43,8 @@ async function main() {
   const r = await commitImport(pub, { limit, rename, actorEmail: "import@oxfordhub.app" });
   console.log(`\n${r.pubCode}: ${r.positionsCreated} created, ${r.positionsSkipped} skipped`);
   console.log(`portfolios created: ${r.portfoliosCreated.join(", ") || "none"}`);
+  const reused = r.portfoliosUsed.filter((n) => !r.portfoliosCreated.includes(n));
+  if (reused.length) console.log(`portfolios reused : ${reused.join(", ")}`);
   if (r.errors.length) {
     console.log(`\n${r.errors.length} errors:`);
     for (const e of r.errors.slice(0, 20)) console.log(`  ${e.position}: ${e.message}`);
