@@ -69,6 +69,15 @@ function numOrNull(v: any): D | null {
   }
 }
 
+/**
+ * A price field, or null. Airtable writes 0 for "no limit set" throughout this
+ * base, so a zero must not become a $0.00 stop-loss on a public page.
+ */
+function positiveOrNull(v: any): D | null {
+  const d = numOrNull(v);
+  return d && d.gt(0) ? d : null;
+}
+
 /** Airtable's Pub Code for a real pub code (MTA for WAR, PMR for PMK). */
 function airtableCodeFor(pubCode: string): string {
   const real = resolvePubCode(pubCode);
@@ -380,6 +389,15 @@ async function importOnePosition(
     companyName: (pos.fields["Position Name"] as string) ?? null,
     openedAt,
     legs,
+    // The guidance columns the embed shows. Airtable names them differently:
+    // "Limit to Open" is the buy-up-to price, and the stop is "Close Below" for
+    // a long (falling through it exits) with the trailing stop as a fallback.
+    // Zero means "not set" in this base, not "a stop at zero".
+    buyUpToPrice: positiveOrNull(pos.fields["Limit to Open"]),
+    stopLossPrice:
+      positiveOrNull(pos.fields["Close Below"]) ??
+      positiveOrNull(pos.fields["Trailing Stop Price"]),
+    targetPrice: positiveOrNull(pos.fields["Close Above"]),
     source: "AIRTABLE_IMPORT",
     airtableId: pos.id,
     actorEmail,

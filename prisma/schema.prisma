@@ -194,6 +194,10 @@ enum StructureKind {
 enum PriceSource {
   LAST_TRADE
   PREV_CLOSE
+  /// Daily net asset value, from the NAV fallback. Interval and private funds
+  /// (PRIVX, ARKVX) have no exchange quote and price once a day, so this is an
+  /// end-of-day figure with its own date — not a delayed intraday print.
+  NAV
   MANUAL
   NONE
 }
@@ -296,6 +300,9 @@ model ManagedPosition {
   /// True when at least one leg could not be priced. Surfaced as "unpriced" in
   /// the UI rather than silently valuing the leg at zero.
   cachedUnpriced      Boolean   @default(false)
+  /// True when the valuation leans on an editor-entered price. Published with
+  /// that caveat visible, never passed off as a market quote.
+  cachedManualPriced  Boolean   @default(false)
   cachedAt            DateTime?
 
   source     ManagedSource @default(MANUAL)
@@ -478,6 +485,26 @@ model MarketInstrument {
   priceSource PriceSource @default(NONE)
   /// Previous session close, the fallback rung of the mark ladder.
   prevClose   Decimal?    @db.Decimal(18, 6)
+
+  /// When a refresh last ATTEMPTED this ticker, whether or not it got a price.
+  /// This is what makes "the provider has no data" a fact rather than a guess: a
+  /// brand-new instrument nobody has fetched yet is unpriced but not uncoverable,
+  /// and must not qualify for a manual price.
+  lastCheckedAt DateTime?
+
+  /// Which Nasdaq asset class resolved this ticker ("mutualfunds", "etf",
+  /// "stocks"). Cached so the NAV fallback costs one request per ticker instead
+  /// of probing every class each run.
+  navAssetClass String?
+
+  /// An editor-entered price, allowed ONLY for an instrument the provider cannot
+  /// price at all — interval and private funds like PRIVX or ARKVX have no
+  /// exchange quote, so Massive returns a row with no price forever. A live price
+  /// always wins over this; the value is kept rather than deleted if coverage
+  /// later appears, so the history of what was published stays intact.
+  manualPrice   Decimal?  @db.Decimal(18, 6)
+  manualPriceAt DateTime?
+  manualPriceBy String?
 
   legs ManagedLeg[]
 

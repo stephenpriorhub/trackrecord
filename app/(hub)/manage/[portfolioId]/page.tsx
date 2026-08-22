@@ -11,6 +11,7 @@ import {
   addCommentAction,
   deletePositionAction,
   updatePortfolioAction,
+  setManualPriceAction,
 } from "../actions";
 
 export const dynamic = "force-dynamic";
@@ -175,6 +176,7 @@ type PositionRow = {
   cachedCurrentPrice: unknown;
   cachedReturnPct: unknown;
   cachedUnpriced: boolean;
+  cachedManualPriced: boolean;
   buyUpToPrice: unknown;
   stopLossPrice: unknown;
   legs: {
@@ -183,7 +185,14 @@ type PositionRow = {
     openQty: number;
     side: string;
     wavgEntry: unknown;
-    instrument: { lastPrice: unknown; lastPriceAt: Date | null };
+    instrument: {
+      lastPrice: unknown;
+      lastPriceAt: Date | null;
+      /** Null means no refresh has looked at it yet — see setManualPriceAction. */
+      lastCheckedAt: Date | null;
+      manualPrice: unknown;
+      priceSource: string;
+    };
   }[];
   comments: {
     id: string;
@@ -318,6 +327,44 @@ function PositionTable({
                         ))}
                     </ActionForm>
                   )}
+
+                  {p.legs
+                    .filter(
+                      (l) =>
+                        l.openQty > 0 &&
+                        l.instrument.lastPrice === null &&
+                        l.instrument.lastCheckedAt !== null
+                    )
+                    .map((l) => (
+                      <ActionForm
+                        key={`mp-${l.id}`}
+                        action={setManualPriceAction}
+                        submitLabel={l.instrument.manualPrice ? "Update price" : "Set price"}
+                        variant="quiet"
+                        className="flex items-end gap-2"
+                      >
+                        <input type="hidden" name="positionId" value={p.id} />
+                        <input type="hidden" name="ticker" value={l.marketTicker} />
+                        <label className="flex flex-col gap-1">
+                          <span
+                            className="text-xs uppercase tracking-wide text-gray-500"
+                            title="No price feed covers this instrument, so it can be entered by hand. A market price always wins if one appears."
+                          >
+                            {l.marketTicker} price (no feed)
+                          </span>
+                          <input
+                            name="price"
+                            inputMode="decimal"
+                            defaultValue={
+                              l.instrument.manualPrice
+                                ? Number(l.instrument.manualPrice).toFixed(2)
+                                : ""
+                            }
+                            className="w-28 rounded-lg border border-gray-700 bg-gray-800 px-2 py-2 text-sm text-white"
+                          />
+                        </label>
+                      </ActionForm>
+                    ))}
 
                   <ActionForm
                     action={deletePositionAction}

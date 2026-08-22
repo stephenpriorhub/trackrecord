@@ -343,11 +343,16 @@ async function main() {
   await prisma.managedPosition.deleteMany({ where: { portfolioId: P } });
   await prisma.managedPortfolio.delete({ where: { id: P } });
   await prisma.service.delete({ where: { id: service.id } });
+  // Only instruments nothing points at any more. ManagedLeg.instrument is
+  // onDelete: Restrict, so a shared ticker (SPY, NVDA) that a real imported
+  // position also holds must survive this teardown — deleting by underlying
+  // alone throws a foreign-key error and aborts the rest of the suite.
   await prisma.marketInstrument.deleteMany({
     where: {
       underlying: {
         in: ["AAPL", "ILLIQ", "SCALE", "PART", "OVER", "TWICE", "NVDA", "SPY", "QQQ"],
       },
+      legs: { none: {} },
     },
   });
 

@@ -62,11 +62,12 @@ export interface EmbedView {
   benchmarkReturn: D | null;
   priceAsOf: Date | null;
   /**
-   * True when at least one shown position is priced from a previous close rather
-   * than a timestamped print — which is every option on the current Massive
-   * plan. The embed says so instead of implying a live quote.
+   * Which kinds of price the shown positions actually lean on. The freshness
+   * line is built from this, because "delayed 15 minutes" is true of an
+   * exchange print and false of a once-a-day fund NAV, and saying it of both
+   * would overstate one of them.
    */
-  hasPrevClosePricing: boolean;
+  priceSources: string[];
   options: EmbedOptions;
 }
 
@@ -229,11 +230,17 @@ export async function loadEmbedView(
     portfolioReturn: meanReturn(shown),
     benchmarkReturn,
     priceAsOf: oldestPriceAt(portfolio.positions),
-    hasPrevClosePricing: portfolio.positions.some(
-      (p) =>
-        p.status === "OPEN" &&
-        p.legs.some((l) => l.openQty > 0 && l.instrument.priceSource === "PREV_CLOSE")
-    ),
+    priceSources: [
+      ...new Set(
+        portfolio.positions
+          .filter((p) => p.status === "OPEN")
+          .flatMap((p) =>
+            p.legs
+              .filter((l) => l.openQty > 0 && l.instrument.lastPrice !== null)
+              .map((l) => l.instrument.priceSource as string)
+          )
+      ),
+    ],
     options,
   };
 }

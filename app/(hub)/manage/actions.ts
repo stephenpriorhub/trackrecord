@@ -584,3 +584,92 @@ export async function deletePositionAction(form: FormData): Promise<ActionResult
   revalidatePath(`/manage/${position.portfolioId}`);
   return { ok: true, message: restore ? "Restored." : `Removed ${position.label}.` };
 }
+
+// ------------------------------------------------------------ manual prices
+
+/**
+ * Enter a price by hand for an instrument nothing can price.
+ *
+ * ELIGIBILITY IS ENFORCED HERE, not just hidden in the UI. Stephen's rule is
+ * "only if there isn't data", so this refuses outright when the instrument
+ * already has one — a live print, a previous close, or a fund NAV. Hiding the
+ * input would leave the rule as a UI convention that a stale page or a crafted
+ * POST could sidestep, and a hand-typed number quietly overriding a real market
+ * price is exactly the failure that matters.
+ *
+ * `lastCheckedAt` is the second half of the rule: an instrument nobody has
+ * fetched yet is unpriced but not uncoverable, and must not qualify.
+ */
+export async function setManualPriceAction(form: FormData): Promise<ActionResult> {
+  const { user, scope } = await actor();
+  const positionId = str(form.get("positionId"));
+  const ticker = str(form.get("ticker"));
+  if (!positionId || !ticker) return { ok: false, error: "Missing position or ticker." };
+
+  const position = await prisma.managedPosition.findUnique({
+    where: { id: positionId },
+    select: { portfolioId: true, legs: { select: { marketTicker: true } } },
+  });
+  if (!position) return { ok: false, error: "Position not found." };
+  if (!(await canManagePortfolio(scope, position.portfolioId))) return DENIED;
+  // The ticker must belong to this position, or the grant on one portfolio would
+  // let an editor set prices used by every other portfolio holding that symbol.
+  if (!position.legs.some((l) => l.marketTicker === ticker)) {
+    return { ok: false, error: "That ticker is not part of this position." };
+  }
+
+  const instrument = await prisma.marketInstrument.findUnique({ where: { ticker } });
+  if (!instrument) return { ok: false, error: "Unknown instrument." };
+
+  if (instrument.lastPrice !== null) {
+    return {
+      ok: false,
+      error: `${ticker} already has a market price, so it cannot be set by hand.`,
+    };
+  }
+  if (instrument.lastCheckedAt === null) {
+    return {
+      ok: false,
+      error: `${ticker} has not been checked against the price feeds yet. Try again after the next refresh.`,
+    };
+  }
+
+  const clear = str(form.get("clear")) === "1";
+  const price = clear ? null : parseDecimal(str(form.get("price")));
+  if (!clear && (!price || price.lte(0))) {
+    return { ok: false, error: "Enter a price greater than zero." };
+  }
+
+  await prisma.marketInstrument.update({
+    where: { ticker },
+    data: {
+      manualPrice: price ? price.toString() : null,
+      manualPriceAt: price ? new Date() : null,
+      manualPriceBy: price ? (user?.email ?? null) : null,
+      priceSource: price ? "MANUAL" : "NONE",
+    },
+  });
+
+  const { recomputePosition } = await import("@/lib/managed/positions");
+  // Every position holding this instrument, not just this one — the price is
+  // per-ticker, so a portfolio elsewhere would otherwise keep a stale figure.
+  for (const p of await prisma.managedPosition.findMany({
+    where: { deletedAt: null, legs: { some: { marketTicker: ticker } } },
+    select: { id: true },
+  })) {
+    await recomputePosition(p.id);
+  }
+
+  await logChange({
+    action: clear ? "instrument.manualPrice.clear" : "instrument.manualPrice.set",
+    entity: "MarketInstrument",
+    entityId: ticker,
+    portfolioId: position.portfolioId,
+    actor: user,
+    before: { manualPrice: instrument.manualPrice?.toString() ?? null },
+    after: { manualPrice: price?.toString() ?? null },
+  });
+
+  revalidatePath(`/manage/${position.portfolioId}`);
+  return { ok: true, message: clear ? `Cleared the manual price for ${ticker}.` : `Set ${ticker} to ${price}.` };
+}

@@ -52,7 +52,7 @@ export default async function PortfolioEmbed({
               )}
             </p>
           )}
-          <p className="pf-asof">{asOfLine(view.priceAsOf, view.hasPrevClosePricing)}</p>
+          <p className="pf-asof">{asOfLine(view.priceAsOf, view.priceSources)}</p>
         </header>
 
         {showOpen && (
@@ -69,21 +69,27 @@ export default async function PortfolioEmbed({
 }
 
 /**
- * The freshness line. Three cases, because claiming more than we know is the one
- * thing this line must never do:
+ * The freshness line.
  *
- *   timestamped print  -> "Current price last updated <stamp> ET · delayed 15 min"
- *   previous close only -> says so; on this data plan every option lands here,
- *                          arriving with a price but no timestamp at all
- *   nothing priced yet  -> says that plainly
+ * Built from the price sources actually in play, because one blanket caveat
+ * would misdescribe at least one of them: an exchange print really is delayed
+ * ~15 minutes, while an interval fund's NAV is a once-a-day figure that is not
+ * "delayed" at all. Claiming more precision than the data has is the one thing
+ * this line must never do.
  */
-function asOfLine(at: Date | null, prevCloseOnly: boolean): string {
-  const delay = marketDataDelayMinutes();
-  if (!at) {
-    return prevCloseOnly
-      ? "Current prices are the previous session's close."
-      : "Current prices not yet available.";
+function asOfLine(at: Date | null, sources: string[]): string {
+  if (!at && sources.length === 0) return "Current prices not yet available.";
+
+  const notes: string[] = [];
+  if (sources.includes("LAST_TRADE")) {
+    notes.push(`market data delayed ${marketDataDelayMinutes()} minutes`);
   }
+  if (sources.includes("NAV")) notes.push("fund prices are the last published NAV");
+  if (sources.includes("PREV_CLOSE")) notes.push("some prices are the previous close");
+  if (sources.includes("MANUAL")) notes.push("some prices are entered by the editor");
+
+  if (!at) return notes.length ? `Current prices: ${notes.join(" · ")}` : "Current prices not yet available.";
+
   const stamp = at.toLocaleString("en-US", {
     timeZone: "America/New_York",
     month: "short",
@@ -92,8 +98,7 @@ function asOfLine(at: Date | null, prevCloseOnly: boolean): string {
     hour: "numeric",
     minute: "2-digit",
   });
-  const base = `Current price last updated ${stamp} ET · market data delayed ${delay} minutes`;
-  return prevCloseOnly ? `${base} · some prices are the previous close` : base;
+  return [`Current price last updated ${stamp} ET`, ...notes].join(" · ");
 }
 
 function Pct({ v }: { v: D | null }) {

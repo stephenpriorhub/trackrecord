@@ -395,6 +395,7 @@ export async function recomputePosition(positionId: string) {
   let entryBasis = ZERO;
   let currentValue = ZERO;
   let unpriced = false;
+  let manualPriced = false;
   let allLegsClosed = true;
   let lastExit: Date | null = null;
 
@@ -447,8 +448,16 @@ export async function recomputePosition(positionId: string) {
     }
 
     if (state.openQty > 0) {
-      const mark = leg.instrument.lastPrice ? dec(leg.instrument.lastPrice.toString()) : null;
+      // Mark ladder: a live provider price always wins. An editor-entered price
+      // is the fallback, and only exists for instruments the provider cannot
+      // price at all (interval and private funds have no exchange quote).
+      const live = leg.instrument.lastPrice ? dec(leg.instrument.lastPrice.toString()) : null;
+      const manual = leg.instrument.manualPrice
+        ? dec(leg.instrument.manualPrice.toString())
+        : null;
+      const mark = live ?? manual;
       if (mark) {
+        if (!live) manualPriced = true;
         currentValue = currentValue.plus(mark.times(sign).times(leg.ratio));
       } else {
         // NEVER value a missing price at zero — that would publish a total loss
@@ -485,6 +494,7 @@ export async function recomputePosition(positionId: string) {
           ? null
           : currentValue.minus(entryBasis).toString(),
       cachedUnpriced: unpriced,
+      cachedManualPriced: manualPriced,
       cachedAt: new Date(),
     },
   });
