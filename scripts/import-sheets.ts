@@ -49,7 +49,7 @@ interface SheetTrade {
 
 /** Every closed sheet trade lands in the publication's main book. */
 const PORTFOLIO_NAME = "Main Portfolio";
-const CONCURRENCY = 8;
+const CONCURRENCY = 20;
 
 function arg(name: string): string | null {
   const i = process.argv.indexOf(`--${name}`);
@@ -118,6 +118,29 @@ async function ensurePortfolio(serviceId: string, pubCode: string) {
   });
 }
 
+/**
+ * What the source said about a trade that the position itself cannot express:
+ * the spread it was, and the direction, since everything is stored on a cost
+ * basis. Null when there is nothing extra to say.
+ */
+function describeSource(t: SheetTrade): string | null {
+  const notes: string[] = [];
+  if (t.multiLeg) {
+    notes.push(
+      `The published track record shows this as a ${t.spread.toLowerCase()} ` +
+        `but does not break out its legs, so it is carried as a single ` +
+        `position at the net.`,
+    );
+  }
+  if (t.side === "SELL") {
+    notes.push(
+      `Recorded as a SHORT position. Entry and return are stated against ` +
+        `capital at risk, which is the basis the published record uses.`,
+    );
+  }
+  return notes.length ? notes.join(" ") : null;
+}
+
 /** Import one trade as an opened-then-closed position. */
 async function importTrade(
   t: SheetTrade,
@@ -139,7 +162,19 @@ async function importTrade(
     legs: [
       {
         kind: t.kind,
-        side: t.side,
+        // ALWAYS BUY, even where the sheet says SHORT.
+        //
+        // The entry here is Cost / (units x multiplier) — capital at risk — and
+        // the published Return % is P&L against that cost. Our engine reads a
+        // SELL open as a credit and gives the position a NEGATIVE basis, which
+        // measures the return against the credit received instead. Same trade,
+        // different denominator, and the sign comes out inverted: an AMD credit
+        // spread the record publishes at -47.5% was stored as +47.5%.
+        //
+        // A positive cost basis is what reproduces the published figure, so
+        // that is what is stored. The direction the sheet stated is kept on the
+        // position rather than thrown away — see thesis below.
+        side: "BUY",
         price: dec(t.entry.toFixed(6)),
         ...(t.kind === "OPTION"
           ? {
@@ -153,11 +188,7 @@ async function importTrade(
     // A spread is carried as one synthetic position priced at the net, because
     // a single sheet row does not name its legs. Saying so on the position is
     // the only honest way to publish it.
-    thesis: t.multiLeg
-      ? `Imported from the published track record as a single net position. ` +
-        `The source records this as a ${t.spread.toLowerCase()} but does not ` +
-        `break out its legs.`
-      : null,
+    thesis: describeSource(t),
   });
 
   const legs = await prisma.managedLeg.findMany({
