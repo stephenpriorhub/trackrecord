@@ -39,6 +39,8 @@ export default function EmbedBuilder({
   const [comments, setComments] = useState(true);
   const [bookColumn, setBookColumn] = useState(true);
   const [autoHeight, setAutoHeight] = useState(true);
+  // Matches DEFAULT_CLOSED_LIMIT in lib/managed/embed.ts. 0 means every row.
+  const [limit, setLimit] = useState(200);
   const [copied, setCopied] = useState(false);
 
   // Only published books can appear, so selection starts as exactly what a
@@ -62,6 +64,7 @@ export default function EmbedBuilder({
     if (show !== "both") p.set("show", show);
     if (!returns) p.set("returns", "0");
     if (!comments) p.set("comments", "0");
+    if (limit !== 200) p.set("limit", String(limit));
     if (mode === "service") {
       if (!bookColumn) p.set("portfolio", "0");
       // Omitted when everything is included: the embed should keep picking up
@@ -78,6 +81,7 @@ export default function EmbedBuilder({
     show,
     returns,
     comments,
+    limit,
     bookColumn,
     allSelected,
     selected,
@@ -186,6 +190,14 @@ export default function EmbedBuilder({
             Auto height
           </Choice>
         </Group>
+
+        <Group label="Closed rows">
+          {[50, 200, 0].map((n) => (
+            <Choice key={n} active={limit === n} onClick={() => setLimit(n)}>
+              {n === 0 ? "All" : `Latest ${n}`}
+            </Choice>
+          ))}
+        </Group>
       </div>
 
       <div>
@@ -223,7 +235,14 @@ export default function EmbedBuilder({
           >
             Preview
           </a>{" "}
-          — shows unpublished portfolios to you only. Live URL:{" "}
+          — shows unpublished portfolios to you only.{" "}
+          {limit === 0 && (
+            <span className="text-yellow-500">
+              &quot;All&quot; renders every closed position; a long record makes
+              a very large page.{" "}
+            </span>
+          )}
+          Live URL:{" "}
           <span className="break-all text-gray-500">{url}</span>
         </p>
       )}

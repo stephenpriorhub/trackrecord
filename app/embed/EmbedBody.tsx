@@ -62,7 +62,20 @@ export default function EmbedBody({ view }: { view: EmbedView }) {
           <Section title="Open Positions" rows={view.open} kind="open" options={options} />
         )}
         {showClosed && (
-          <Section title="Closed Positions" rows={view.closed} kind="closed" options={options} />
+          <Section
+            title="Closed Positions"
+            rows={view.closed}
+            kind="closed"
+            options={options}
+            // Say plainly that the table is a slice. The percentages above are
+            // computed over the whole record, so a reader who is not told would
+            // reasonably assume these rows are what produced them.
+            note={
+              view.closedTotal > view.closed.length
+                ? `Showing the ${view.closed.length} most recent of ${view.closedTotal.toLocaleString()} closed positions. Returns above cover all ${view.closedTotal.toLocaleString()}.`
+                : null
+            }
+          />
         )}
       </div>
       {/* Report our height so a host page can size the iframe without a scrollbar. */}
@@ -136,11 +149,13 @@ function Section({
   rows,
   kind,
   options,
+  note = null,
 }: {
   title: string;
   rows: EmbedRow[];
   kind: "open" | "closed";
   options: EmbedOptions;
+  note?: string | null;
 }) {
   // Only a merged service embed carries this column; on a single book every row
   // would answer the same, which is just noise.
@@ -175,6 +190,7 @@ function Section({
   return (
     <section className="pf-card">
       <h2>{title}</h2>
+      {note && <p className="pf-note">{note}</p>}
 
       {rows.length === 0 ? (
         <p className="pf-empty">No {kind} positions.</p>
@@ -273,6 +289,7 @@ const CSS = `
            box-shadow: 0 1px 2px rgba(0,0,0,.06); }
 .pf-card h2 { margin: 0 0 16px; font-size: 19px; font-weight: 700; color: #111827; }
 .pf-empty { margin: 0; font-size: 14px; color: #6b7280; }
+.pf-note { margin: -8px 0 14px; font-size: 12px; color: #6b7280; }
 .pf table { width: 100%; border-collapse: collapse; font-size: 14px; }
 .pf th { text-align: center; font-weight: 700; color: #374151; padding: 8px 10px;
          border-bottom: 1px solid #e5e7eb; white-space: nowrap; }

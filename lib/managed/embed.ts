@@ -37,7 +37,22 @@ export interface EmbedOptions {
    * shown on a single-portfolio embed.
    */
   portfolioColumn: boolean;
+  /**
+   * How many CLOSED rows to render, newest first. 0 means all.
+   *
+   * There is a default because there has to be: Daily Profits Live has 3,659
+   * closed trades, and an iframe that renders every one is megabytes of HTML
+   * and tens of thousands of pixels tall. Open positions are never capped —
+   * a book has few of those and they are the point of the embed.
+   *
+   * The headline return is ALWAYS computed over the whole record, not the
+   * visible slice, so changing this cannot change the number a reader sees.
+   */
+  limit: number;
 }
+
+/** Closed rows rendered when the embed does not say otherwise. */
+export const DEFAULT_CLOSED_LIMIT = 200;
 
 /** Parse the embed's query string. Defaults show everything. */
 export function parseEmbedOptions(
@@ -60,6 +75,13 @@ export function parseEmbedOptions(
           .filter(Boolean)
       : null,
     portfolioColumn: !off(one(sp.portfolio)),
+    limit: (() => {
+      const raw = one(sp.limit);
+      if (raw === undefined) return DEFAULT_CLOSED_LIMIT;
+      const n = Number.parseInt(raw, 10);
+      // "all", a negative, or junk all mean "do not cap".
+      return Number.isFinite(n) && n > 0 ? n : 0;
+    })(),
   };
 }
 
@@ -99,8 +121,15 @@ export interface EmbedView {
    */
   preview: boolean;
   open: EmbedRow[];
+  /** The visible closed rows — newest first, capped by options.limit. */
   closed: EmbedRow[];
-  /** Equal-weighted mean return across the rows shown. */
+  /** How many closed rows exist in total, whether or not they are rendered. */
+  closedTotal: number;
+  /**
+   * Equal-weighted mean return across the whole record being shown — NOT just
+   * the rows that fit under the limit. A capped table must not quietly publish
+   * the average of its most recent 200 trades as the average of all 3,659.
+   */
   portfolioReturn: D | null;
   benchmarkReturn: D | null;
   priceAsOf: Date | null;
@@ -364,13 +393,20 @@ async function buildView(
     (a, b) => (b.closedAt?.getTime() ?? 0) - (a.closedAt?.getTime() ?? 0),
   );
 
-  // The headline compares like with like: whatever the reader can actually see.
+  // The headline compares like with like: whichever TABLES the reader can see.
+  // Built before the row cap is applied, so the figure describes the record
+  // rather than the page.
   const shown =
     meta.options.show === "open"
       ? open
       : meta.options.show === "closed"
         ? closed
         : [...open, ...closed];
+  const portfolioReturn = meanReturn(shown);
+
+  const closedTotal = closed.length;
+  const closedShown =
+    meta.options.limit > 0 ? closed.slice(0, meta.options.limit) : closed;
 
   const benchmark = await prisma.marketInstrument.findUnique({
     where: { ticker: meta.benchmarkTicker },
@@ -404,8 +440,9 @@ async function buildView(
     })),
     preview: meta.preview,
     open,
-    closed,
-    portfolioReturn: meanReturn(shown),
+    closed: closedShown,
+    closedTotal,
+    portfolioReturn,
     benchmarkReturn,
     priceAsOf: oldestPriceAt(allPositions),
     priceSources: [
