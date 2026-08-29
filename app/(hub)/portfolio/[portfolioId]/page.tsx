@@ -22,6 +22,13 @@ import {
 
 export const dynamic = "force-dynamic";
 
+/**
+ * Closed positions rendered on this page. The figures above the table come from
+ * portfolioStats, which runs its own query over the whole book, so capping what
+ * is listed never changes what is reported.
+ */
+const CLOSED_PAGE = 200;
+
 /** A stored FRACTION rendered as a signed percentage, with its colour. */
 function pctSimple(v: unknown): { text: string; cls: string } {
   if (v === null || v === undefined) return { text: "—", cls: "text-gray-500" };
@@ -59,27 +66,41 @@ export default async function PortfolioPage({
 
   const portfolio = await prisma.managedPortfolio.findUnique({
     where: { id: portfolioId },
-    include: {
-      service: true,
-      positions: {
-        where: { deletedAt: null },
-        orderBy: [{ status: "asc" }, { openedAt: "desc" }],
-        include: {
-          guru: { select: { name: true } },
-          legs: { orderBy: { legIndex: "asc" }, include: { instrument: true } },
-          comments: {
-            where: { deletedAt: null },
-            orderBy: { createdAt: "desc" },
-            take: 3,
-          },
-        },
-      },
-    },
+    include: { service: true },
   });
   if (!portfolio) notFound();
 
-  const open = portfolio.positions.filter((p) => p.status === "OPEN");
-  const closed = portfolio.positions.filter((p) => p.status === "CLOSED");
+  // Open and closed are fetched separately so the closed table can be capped
+  // without capping the open one. Daily Profits Live imported 3,659 closed
+  // trades into a single book; loading every one with its legs, instruments and
+  // comments to render one page is a heavy query and a huge document, and the
+  // editor is only ever looking at the recent end of it.
+  const positionInclude = {
+    guru: { select: { name: true } },
+    legs: { orderBy: { legIndex: "asc" as const }, include: { instrument: true } },
+    comments: {
+      where: { deletedAt: null },
+      orderBy: { createdAt: "desc" as const },
+      take: 3,
+    },
+  };
+
+  const [open, closed, closedTotal] = await Promise.all([
+    prisma.managedPosition.findMany({
+      where: { portfolioId, deletedAt: null, status: "OPEN" },
+      orderBy: { openedAt: "desc" },
+      include: positionInclude,
+    }),
+    prisma.managedPosition.findMany({
+      where: { portfolioId, deletedAt: null, status: "CLOSED" },
+      orderBy: { closedAt: "desc" },
+      include: positionInclude,
+      take: CLOSED_PAGE,
+    }),
+    prisma.managedPosition.count({
+      where: { portfolioId, deletedAt: null, status: "CLOSED" },
+    }),
+  ]);
 
   const stats = await portfolioStats(portfolio.id);
   const benchmark = portfolio.showBenchmark
@@ -101,7 +122,7 @@ export default async function PortfolioPage({
           <p className="mt-1 max-w-prose text-sm text-gray-400">{portfolio.description}</p>
         )}
         <p className="mt-1 text-xs text-gray-500">
-          {open.length} open · {closed.length} closed
+          {open.length} open · {closedTotal} closed
           {portfolio.showBenchmark && ` · vs ${benchmarkLabel(portfolio.benchmarkTicker)}`}
         </p>
       </div>
@@ -124,7 +145,11 @@ export default async function PortfolioPage({
       />
 
       <PositionTable
-        title="Closed positions"
+        title={
+          closedTotal > closed.length
+            ? `Closed positions — most recent ${closed.length} of ${closedTotal.toLocaleString()}`
+            : "Closed positions"
+        }
         positions={closed}
         empty="Nothing closed yet."
       />
