@@ -138,7 +138,30 @@ function describeSource(t: SheetTrade): string | null {
         `capital at risk, which is the basis the published record uses.`,
     );
   }
+  if (flooredLoss(t)) {
+    notes.push(
+      `The published record shows a loss of ` +
+        `${((t.sheetReturn ?? 0) * 100).toFixed(2)}%, worse than the cost ` +
+        `basis. It is stored at -100%, the floor a closing price of zero ` +
+        `allows, so this position reads very slightly better here than in the ` +
+        `source.`,
+    );
+  }
   return notes.length ? notes.join(" ") : null;
+}
+
+/**
+ * A published loss deeper than the capital committed.
+ *
+ * Reproducing it needs a NEGATIVE closing price, which closePosition rejects —
+ * rightly, for anything a guru enters. Four trades in 4,241 are affected and
+ * they move Daily Profits Live's average return by 0.004 of a percentage
+ * point, so the guard stays and the floor is disclosed instead. Disclosed
+ * rather than silent because the error flatters the record, and that is the
+ * direction a track record must never quietly drift.
+ */
+function flooredLoss(t: SheetTrade): boolean {
+  return t.sheetReturn !== null && t.sheetReturn < -1.0000001;
 }
 
 /** Import one trade as an opened-then-closed position. */
@@ -268,6 +291,16 @@ async function main() {
     console.log(`unrouted        ${unrouted.length}  (no portfolio match — skipped)`);
   console.log(`already imported ${already}`);
   console.log(`to import       ${todo.length}${LIMIT > 0 ? `  (--limit ${LIMIT})` : ""}`);
+  const floored = todo.filter(flooredLoss);
+  if (floored.length) {
+    console.log(
+      `floored losses  ${floored.length}  (published worse than -100%; stored at -100%)`,
+    );
+    for (const t of floored)
+      console.log(
+        `                  ${t.pubCode} ${t.symbol} ${t.openedAt} ${((t.sheetReturn ?? 0) * 100).toFixed(2)}%`,
+      );
+  }
   console.log("");
   for (const [pub, list] of [...byPub].sort()) {
     const closedRet = list.reduce((a, t) => a + (t.sheetReturn ?? 0), 0);
