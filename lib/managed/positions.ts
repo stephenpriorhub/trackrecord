@@ -46,6 +46,11 @@ export interface LegInput {
   // option-only
   expiry?: string; // "YYYY-MM-DD"
   strike?: D;
+  /**
+   * Call or put. Required for anything live. May be absent ONLY on a historical
+   * import (see CreatePositionInput.historical), because the published track
+   * records state "OPTION" without saying which for most of their history.
+   */
   right?: "CALL" | "PUT";
 }
 
@@ -72,8 +77,28 @@ export interface CreatePositionInput {
   comment?: string | null;
   actorEmail?: string | null;
   actorName?: string | null;
-  source?: "MANUAL" | "AIRTABLE_IMPORT";
+  source?: "MANUAL" | "AIRTABLE_IMPORT" | "SHEET_IMPORT";
   airtableId?: string | null;
+  /**
+   * Stable key for a non-Airtable import, so re-running it updates rather than
+   * duplicates. Held separately from airtableId because the two name records in
+   * different systems and one row can legitimately have neither.
+   */
+  externalKey?: string | null;
+  /**
+   * This is a CLOSED record being loaded from a published track record, not a
+   * live pick.
+   *
+   * It relaxes exactly one rule: an option leg may name its expiry and strike
+   * without saying call or put, because that is how the source sheets record
+   * most of their history. Such a leg gets a synthetic `HIST:` ticker and is
+   * registered inactive, so the price cron never tries to quote a contract we
+   * cannot actually name — and a synthetic string can never be mistaken for a
+   * real OCC symbol.
+   *
+   * Never set this for a guru's entry. An open position must know what it holds.
+   */
+  historical?: boolean;
   /** Who made the pick. Resolve it with lib/managed/war-room-owners.ts. */
   guruSlug?: string | null;
 }
@@ -98,10 +123,18 @@ function normalizeStockTicker(raw: string): string {
  * `ticker` is the provider's spelling (BRK.B) and `occRoot` is the letters-only
  * form (BRKB) — see normalizeStockTicker for why they differ.
  */
-function marketTickerFor(ticker: string, occRoot: string, leg: LegInput): string {
+function marketTickerFor(
+  ticker: string,
+  occRoot: string,
+  leg: LegInput,
+  historical = false,
+): string {
   if (leg.kind === "STOCK") return ticker;
   if (!leg.expiry || !leg.strike || !leg.right) {
-    throw new Error("An option leg needs an expiry, a strike and call/put.");
+    if (!historical) {
+      throw new Error("An option leg needs an expiry, a strike and call/put.");
+    }
+    return historicalOptionTicker(occRoot, leg);
   }
   return buildOcc({
     underlying: occRoot,
@@ -114,6 +147,26 @@ function marketTickerFor(ticker: string, occRoot: string, leg: LegInput): string
 }
 
 /**
+ * A deliberately NON-OCC identifier for a historical contract the source states
+ * only partially.
+ *
+ * The `HIST:` prefix is the whole point: it cannot collide with a real OCC
+ * symbol, and if one ever leaked into a quote request it would fail loudly
+ * rather than silently returning someone else's contract. Trades on the same
+ * contract still share one identifier, so history stays grouped.
+ */
+function historicalOptionTicker(occRoot: string, leg: LegInput): string {
+  if (!leg.expiry || !leg.strike) return `HIST:${occRoot}:OPT`;
+  const [y, m, d] = leg.expiry.split("-");
+  // "X" sits where C or P would in an OCC symbol: the strike and expiry are
+  // known, the right is not, and the string says so.
+  const strike = Math.round(leg.strike.toNumber() * 1000)
+    .toString()
+    .padStart(8, "0");
+  return `HIST:${occRoot}${y.slice(2)}${m}${d}X${strike}`;
+}
+
+/**
  * Register the instrument a leg prices against, so the price cron knows to fetch
  * it. Reactivates a row that was previously retired rather than inserting a
  * duplicate, which keeps the last known price attached to closed history.
@@ -122,6 +175,7 @@ async function ensureInstrument(
   ticker: string,
   underlying: string,
   leg: LegInput,
+  active = true,
 ) {
   const base = {
     kind: leg.kind,
@@ -131,14 +185,40 @@ async function ensureInstrument(
         ? new Date(`${leg.expiry}T00:00:00Z`)
         : null,
     strike: leg.kind === "OPTION" && leg.strike ? leg.strike.toString() : null,
-    right: leg.kind === "OPTION" ? leg.right : null,
-    active: true,
+    right: leg.kind === "OPTION" ? (leg.right ?? null) : null,
+    active,
   };
-  return prisma.marketInstrument.upsert({
-    where: { ticker },
-    update: { active: true },
-    create: { ticker, ...base },
-  });
+  // Prisma's upsert is a read-then-write, not an atomic statement, so two
+  // writers registering the SAME contract at the same moment both see "absent"
+  // and both insert — and one loses on the unique index. That is not a
+  // theoretical race: it broke two of the first forty-one imported trades, and
+  // it is equally reachable by two gurus opening the same contract at once.
+  // Losing the race just means the row already exists, which is the state we
+  // wanted, so the retry reads it back.
+  try {
+    return await prisma.marketInstrument.upsert({
+      where: { ticker },
+      // Never reactivate on a historical import: a closed record must not put a
+      // contract back into the price cron's fetch list.
+      update: active ? { active: true } : {},
+      create: { ticker, ...base },
+    });
+  } catch (e) {
+    if (!isUniqueViolation(e)) throw e;
+    return prisma.marketInstrument.update({
+      where: { ticker },
+      data: active ? { active: true } : {},
+    });
+  }
+}
+
+/** Prisma's "unique constraint failed" code. */
+function isUniqueViolation(e: unknown): boolean {
+  return (
+    typeof e === "object" &&
+    e !== null &&
+    (e as { code?: string }).code === "P2002"
+  );
 }
 
 /** Human label: "NVDA", "NVDA 1/16/27 $200 Call", "SPY 550/560 Call Debit Spread". */
@@ -149,7 +229,20 @@ function buildLabel(
   tickers: string[],
 ): string {
   if (legs.length === 1) {
-    return legs[0].kind === "STOCK" ? underlying : describeOcc(tickers[0]);
+    const leg = legs[0];
+    if (leg.kind === "STOCK") return underlying;
+    // describeOcc can only read a real OCC symbol. A historical leg whose right
+    // is unknown says so — "MSFT 1/17/25 $435 Option" — rather than picking a
+    // side the source never stated.
+    if (!tickers[0].startsWith("HIST:")) return describeOcc(tickers[0]);
+    const parts = [underlying];
+    if (leg.expiry) {
+      const [y, m, d] = leg.expiry.split("-");
+      parts.push(`${Number(m)}/${Number(d)}/${y.slice(2)}`);
+    }
+    if (leg.strike) parts.push(`$${leg.strike.toString()}`);
+    parts.push(leg.right ? (leg.right === "CALL" ? "Call" : "Put") : "Option");
+    return parts.join(" ");
   }
   const strikes = legs
     .map((l) => l.strike?.toString())
@@ -194,11 +287,32 @@ export async function createPosition(input: CreatePositionInput) {
   const distinctExpiries = [
     ...new Set(input.legs.map((l) => l.expiry).filter((e): e is string => !!e)),
   ];
-  const structure = classifyStructure(specs, entryCash, distinctExpiries);
+  // classifyStructure reasons about call/put; with the right unknown it cannot
+  // tell a long call from a long put, so a historical leg is labelled by its
+  // RISK instead, which is the one thing still knowable. Long options are
+  // defined risk; a naked short is not.
+  const rightUnknown = input.legs.some(
+    (l) => l.kind === "OPTION" && !l.right,
+  );
+  const structure =
+    input.historical && rightUnknown
+      ? input.legs.every((l) => l.side === "BUY")
+        ? "CUSTOM_DEFINED_RISK"
+        : "UNDEFINED_RISK"
+      : classifyStructure(specs, entryCash, distinctExpiries);
 
-  const tickers = input.legs.map((l) => marketTickerFor(underlying, occRoot, l));
+  const tickers = input.legs.map((l) =>
+    marketTickerFor(underlying, occRoot, l, input.historical),
+  );
   for (let i = 0; i < input.legs.length; i += 1) {
-    await ensureInstrument(tickers[i], underlying, input.legs[i]);
+    // A historical record is closed and will never be quoted, so its instrument
+    // is registered inactive rather than joining the price cron's fetch list.
+    await ensureInstrument(
+      tickers[i],
+      underlying,
+      input.legs[i],
+      !input.historical,
+    );
   }
 
   const units = Math.max(1, Math.floor(input.units ?? 1));
@@ -233,6 +347,7 @@ export async function createPosition(input: CreatePositionInput) {
         guruId,
         source: input.source ?? "MANUAL",
         airtableId: input.airtableId ?? null,
+        externalKey: input.externalKey ?? null,
         createdByEmail: input.actorEmail ?? null,
         updatedByEmail: input.actorEmail ?? null,
       },

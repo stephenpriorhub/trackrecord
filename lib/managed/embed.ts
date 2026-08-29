@@ -1,14 +1,19 @@
 /**
- * Reading a portfolio for public display.
+ * Reading portfolios for public display.
  *
- * Everything the embed renders is computed here so the page component stays a
- * table. Two rules the embed depends on:
+ * Everything the embed renders is computed here so the page components stay
+ * tables. Two rules the embeds depend on:
  *
  *   - A missing price is "—", never 0 and never a return of -100%. An illiquid
  *     option contract must not publish a total loss.
  *   - The "last updated" stamp is the OLDEST provider timestamp among the
- *     instruments this portfolio actually uses, so the line is a promise that
- *     everything on the page is at least that fresh.
+ *     instruments actually used, so the line is a promise that everything on the
+ *     page is at least that fresh.
+ *
+ * Two entry points, one body: `loadPortfolioEmbed` renders a single book and
+ * `loadServiceEmbed` renders a whole publication. They differ only in which
+ * portfolios they select — every row, total and freshness rule below is shared,
+ * so a service embed can never disagree with the individual embeds it contains.
  */
 import { prisma } from "../prisma";
 import { dec, ZERO, type D } from "../money";
@@ -20,6 +25,18 @@ export interface EmbedOptions {
   /** false hides every % figure, leaving prices only. */
   returns: boolean;
   comments: boolean;
+  /**
+   * Portfolio slugs to include in a service embed; null means every eligible
+   * one. This is a DISPLAY filter layered on top of visibility, never a way
+   * around it — a PRIVATE portfolio stays out whether or not it is named here.
+   */
+  only: string[] | null;
+  /**
+   * Whether rows carry the portfolio they came from. On by default for a
+   * service embed, where a merged table is ambiguous without it, and never
+   * shown on a single-portfolio embed.
+   */
+  portfolioColumn: boolean;
 }
 
 /** Parse the embed's query string. Defaults show everything. */
@@ -31,10 +48,18 @@ export function parseEmbedOptions(
   const show = one(sp.show);
   const off = (v: string | undefined) =>
     v === "0" || v === "false" || v === "no";
+  const only = one(sp.only);
   return {
     show: show === "open" || show === "closed" ? show : "both",
     returns: !off(one(sp.returns)),
     comments: !off(one(sp.comments)),
+    only: only
+      ? only
+          .split(",")
+          .map((s) => s.trim())
+          .filter(Boolean)
+      : null,
+    portfolioColumn: !off(one(sp.portfolio)),
   };
 }
 
@@ -54,16 +79,25 @@ export interface EmbedRow {
   daysHeld: number | null;
   unpriced: boolean;
   comment: string | null;
+  /** Which book this row came from. Rendered only on a service embed. */
+  portfolioName: string;
 }
 
 export interface EmbedView {
-  portfolio: {
-    id: string;
-    name: string;
-    slug: string;
-    benchmarkTicker: string;
-  };
+  kind: "portfolio" | "service";
+  /** Heading text: the portfolio name, or the publication name. */
+  title: string;
   serviceName: string;
+  benchmarkTicker: string;
+  showBenchmark: boolean;
+  /** The books this view is built from, in display order. */
+  included: { id: string; name: string; slug: string; positions: number }[];
+  /**
+   * True when a PRIVATE or archived portfolio is on screen because an
+   * authorised manager asked to preview it. The page renders a banner off this
+   * so a preview can never be mistaken for the live embed.
+   */
+  preview: boolean;
   open: EmbedRow[];
   closed: EmbedRow[];
   /** Equal-weighted mean return across the rows shown. */
@@ -104,14 +138,18 @@ function meanReturn(rows: EmbedRow[]): D | null {
   return present.reduce((a, b) => a.plus(b), ZERO).div(present.length);
 }
 
-export async function loadEmbedView(
-  slug: string,
-  options: EmbedOptions,
-): Promise<EmbedView | null> {
-  const portfolio = await prisma.managedPortfolio.findUnique({
-    where: { slug },
+/**
+ * The one portfolio query both embeds use.
+ *
+ * Sharing it is what keeps a service embed consistent with the per-portfolio
+ * embeds it aggregates: same positions, same ordering, same exit expansion.
+ */
+async function fetchPortfolios(where: Record<string, unknown>) {
+  return prisma.managedPortfolio.findMany({
+    where,
+    orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
     include: {
-      service: { select: { name: true } },
+      service: { select: { name: true, slug: true } },
       positions: {
         where: { deletedAt: null },
         orderBy: [{ status: "asc" }, { openedAt: "desc" }],
@@ -133,8 +171,8 @@ export async function loadEmbedView(
             orderBy: { createdAt: "desc" },
             take: 1,
           },
-          // Each exit is reported on its own line (see closedRowsFor), so a
-          // position scaled out in halves shows two results, not one blend.
+          // Each exit is reported on its own line (see below), so a position
+          // scaled out in halves shows two results, not one blend.
           executions: {
             where: { intent: "CLOSE", deletedAt: null },
             orderBy: { executedAt: "asc" },
@@ -151,92 +189,198 @@ export async function loadEmbedView(
       },
     },
   });
+}
 
-  // A private or archived portfolio is indistinguishable from a wrong slug.
-  if (!portfolio || portfolio.visibility !== "PUBLIC" || portfolio.archivedAt)
-    return null;
+type LoadedPortfolio = Awaited<ReturnType<typeof fetchPortfolios>>[number];
 
+/**
+ * A single portfolio's public embed.
+ *
+ * `allowPrivate` is granted by the PAGE, only after it has confirmed the caller
+ * may manage this portfolio. It is not readable from the query string.
+ */
+export async function loadPortfolioEmbed(
+  slug: string,
+  options: EmbedOptions,
+  allowPrivate = false,
+): Promise<EmbedView | null> {
+  const found = await fetchPortfolios({ slug });
+  const portfolio = found[0];
+  if (!portfolio) return null;
+
+  const live = portfolio.visibility === "PUBLIC" && !portfolio.archivedAt;
+  // A private or archived portfolio is indistinguishable from a wrong slug,
+  // unless an authorised manager is previewing it.
+  if (!live && !allowPrivate) return null;
+
+  return buildView([portfolio], {
+    kind: "portfolio",
+    title: portfolio.name,
+    serviceName: portfolio.service.name,
+    benchmarkTicker: portfolio.benchmarkTicker,
+    showBenchmark: portfolio.showBenchmark,
+    // Never label rows on a single-portfolio embed: there is only one answer.
+    options: { ...options, portfolioColumn: false },
+    preview: !live,
+  });
+}
+
+/**
+ * A whole publication's embed: every eligible portfolio merged into one pair of
+ * tables.
+ *
+ * Eligibility is visibility FIRST and selection second. `only` can narrow what a
+ * page shows, but a PRIVATE book is never published by being named in a query
+ * string — otherwise anyone could guess a slug and read an unpublished book out
+ * of a service embed.
+ */
+export async function loadServiceEmbed(
+  serviceSlug: string,
+  options: EmbedOptions,
+  allowPrivate = false,
+): Promise<EmbedView | null> {
+  const service = await prisma.service.findUnique({
+    where: { slug: serviceSlug },
+    select: { name: true },
+  });
+  if (!service) return null;
+
+  const all = await fetchPortfolios({
+    service: { slug: serviceSlug },
+    ...(allowPrivate ? {} : { visibility: "PUBLIC", archivedAt: null }),
+  });
+
+  const eligible = options.only
+    ? all.filter((p) => options.only!.includes(p.slug))
+    : all;
+  // An empty service embed is a wrong link, not a blank page: 404 rather than
+  // publish a table with nothing in it.
+  if (eligible.length === 0) return null;
+
+  // The comparison index comes from the books themselves rather than a query
+  // param, so the embed cannot be pointed at a flattering benchmark from the
+  // outside. Most common wins; ties break on display order.
+  const counts = new Map<string, number>();
+  for (const p of eligible) {
+    if (!p.showBenchmark) continue;
+    counts.set(p.benchmarkTicker, (counts.get(p.benchmarkTicker) ?? 0) + 1);
+  }
+  const benchmarkTicker =
+    [...counts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ??
+    eligible[0].benchmarkTicker;
+
+  return buildView(eligible, {
+    kind: "service",
+    title: service.name,
+    serviceName: service.name,
+    benchmarkTicker,
+    showBenchmark: counts.size > 0,
+    options,
+    preview: eligible.some(
+      (p) => p.visibility !== "PUBLIC" || p.archivedAt !== null,
+    ),
+  });
+}
+
+/** Shared row-building, totals and freshness for both embed kinds. */
+async function buildView(
+  portfolios: LoadedPortfolio[],
+  meta: {
+    kind: "portfolio" | "service";
+    title: string;
+    serviceName: string;
+    benchmarkTicker: string;
+    showBenchmark: boolean;
+    options: EmbedOptions;
+    preview: boolean;
+  },
+): Promise<EmbedView> {
   const open: EmbedRow[] = [];
   const closed: EmbedRow[] = [];
 
-  for (const p of portfolio.positions) {
-    const single = p.legs.length === 1 ? p.legs[0] : null;
-    const base = {
-      // A single-leg position shows its plain ticker (matching the mockup's
-      // "$PRIVX"); a spread shows its built label, since no one ticker
-      // describes it.
-      ticker: single ? p.underlying : p.label,
-      label: p.label,
-      companyName: p.companyName,
-      openedAt: p.openedAt,
-      entryPrice: d(p.cachedEntryPrice),
-      buyUpTo: d(p.buyUpToPrice),
-      stopLoss: d(p.stopLossPrice),
-    };
+  for (const portfolio of portfolios) {
+    for (const p of portfolio.positions) {
+      const single = p.legs.length === 1 ? p.legs[0] : null;
+      const base = {
+        // A single-leg position shows its plain ticker (matching the mockup's
+        // "$PRIVX"); a spread shows its built label, since no one ticker
+        // describes it.
+        ticker: single ? p.underlying : p.label,
+        label: p.label,
+        companyName: p.companyName,
+        openedAt: p.openedAt,
+        entryPrice: d(p.cachedEntryPrice),
+        buyUpTo: d(p.buyUpToPrice),
+        stopLoss: d(p.stopLossPrice),
+        portfolioName: portfolio.name,
+      };
 
-    // Anything still open is one row, marked at the current price.
-    const stillOpen = p.legs.some((l) => l.openQty > 0);
-    if (stillOpen) {
-      open.push({
-        ...base,
-        id: p.id,
-        closedAt: null,
-        currentPrice: d(p.cachedCurrentPrice),
-        returnPct: d(p.cachedReturnPct),
-        daysHeld: null,
-        unpriced: p.cachedUnpriced,
-        comment: p.comments[0]?.body ?? null,
-      });
-    }
+      // Anything still open is one row, marked at the current price.
+      const stillOpen = p.legs.some((l) => l.openQty > 0);
+      if (stillOpen) {
+        open.push({
+          ...base,
+          id: p.id,
+          closedAt: null,
+          currentPrice: d(p.cachedCurrentPrice),
+          returnPct: d(p.cachedReturnPct),
+          daysHeld: null,
+          unpriced: p.cachedUnpriced,
+          comment: p.comments[0]?.body ?? null,
+        });
+      }
 
-    // EVERY exit gets its own row. A position scaled out in halves was two
-    // decisions with two results, and that is how these portfolios are
-    // published — see the two DXYZ lines in the reference design. Blending them
-    // into one average would hide both.
-    for (const exec of p.executions) {
-      const exitPrice = netExitPrice(exec.fills);
-      const entry = d(p.cachedEntryPrice);
-      const returnPct =
-        exitPrice && entry && !entry.isZero()
-          ? exitPrice.minus(entry).div(entry.abs())
-          : null;
+      // EVERY exit gets its own row. A position scaled out in halves was two
+      // decisions with two results, and that is how these portfolios are
+      // published — see the two DXYZ lines in the reference design. Blending
+      // them into one average would hide both.
+      for (const exec of p.executions) {
+        const exitPrice = netExitPrice(exec.fills);
+        const entry = d(p.cachedEntryPrice);
+        const returnPct =
+          exitPrice && entry && !entry.isZero()
+            ? exitPrice.minus(entry).div(entry.abs())
+            : null;
 
-      closed.push({
-        ...base,
-        id: exec.id,
-        closedAt: exec.executedAt,
-        currentPrice: exitPrice,
-        returnPct,
-        daysHeld: daysBetween(p.openedAt, exec.executedAt),
-        unpriced: exitPrice === null,
-        comment:
-          exec.comments[0]?.body ?? exec.note ?? p.comments[0]?.body ?? null,
-      });
+        closed.push({
+          ...base,
+          id: exec.id,
+          closedAt: exec.executedAt,
+          currentPrice: exitPrice,
+          returnPct,
+          daysHeld: daysBetween(p.openedAt, exec.executedAt),
+          unpriced: exitPrice === null,
+          comment:
+            exec.comments[0]?.body ?? exec.note ?? p.comments[0]?.body ?? null,
+        });
+      }
     }
   }
 
-  // Newest exits first, matching how the open table is ordered.
+  // Newest first in both tables. Across a merged service embed this interleaves
+  // books by date, which is the point: it reads as one track record.
+  open.sort((a, b) => b.openedAt.getTime() - a.openedAt.getTime());
   closed.sort(
     (a, b) => (b.closedAt?.getTime() ?? 0) - (a.closedAt?.getTime() ?? 0),
   );
 
   // The headline compares like with like: whatever the reader can actually see.
   const shown =
-    options.show === "open"
+    meta.options.show === "open"
       ? open
-      : options.show === "closed"
+      : meta.options.show === "closed"
         ? closed
         : [...open, ...closed];
 
   const benchmark = await prisma.marketInstrument.findUnique({
-    where: { ticker: portfolio.benchmarkTicker },
+    where: { ticker: meta.benchmarkTicker },
     select: { lastPrice: true, prevClose: true },
   });
 
-  // Benchmark move on the same data the positions are priced from. Session change
-  // only — a like-for-like since-inception benchmark needs a historical bar the
-  // current Massive plan does not provide, and inventing one would be worse than
-  // showing none.
+  // Benchmark move on the same data the positions are priced from. Session
+  // change only — a like-for-like since-inception benchmark needs a historical
+  // bar the current Massive plan does not provide, and inventing one would be
+  // worse than showing none.
   let benchmarkReturn: D | null = null;
   const bLast = d(benchmark?.lastPrice);
   const bPrev = d(benchmark?.prevClose);
@@ -244,22 +388,29 @@ export async function loadEmbedView(
     benchmarkReturn = bLast.minus(bPrev).div(bPrev);
   }
 
+  const allPositions = portfolios.flatMap((p) => p.positions);
+
   return {
-    portfolio: {
-      id: portfolio.id,
-      name: portfolio.name,
-      slug: portfolio.slug,
-      benchmarkTicker: portfolio.benchmarkTicker,
-    },
-    serviceName: portfolio.service.name,
+    kind: meta.kind,
+    title: meta.title,
+    serviceName: meta.serviceName,
+    benchmarkTicker: meta.benchmarkTicker,
+    showBenchmark: meta.showBenchmark,
+    included: portfolios.map((p) => ({
+      id: p.id,
+      name: p.name,
+      slug: p.slug,
+      positions: p.positions.length,
+    })),
+    preview: meta.preview,
     open,
     closed,
     portfolioReturn: meanReturn(shown),
     benchmarkReturn,
-    priceAsOf: oldestPriceAt(portfolio.positions),
+    priceAsOf: oldestPriceAt(allPositions),
     priceSources: [
       ...new Set(
-        portfolio.positions
+        allPositions
           .filter((p) => p.status === "OPEN")
           .flatMap((p) =>
             p.legs
@@ -268,7 +419,7 @@ export async function loadEmbedView(
           ),
       ),
     ],
-    options,
+    options: meta.options,
   };
 }
 

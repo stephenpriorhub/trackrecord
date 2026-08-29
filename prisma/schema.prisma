@@ -166,6 +166,10 @@ enum ManagedStatus {
 enum ManagedSource {
   MANUAL
   AIRTABLE_IMPORT
+  /// Loaded from a publication's own published track-record spreadsheet. These
+  /// are always CLOSED history: the sheets record completed trades, while the
+  /// open book lives in Airtable.
+  SHEET_IMPORT
 }
 
 /// PRIVATE portfolios 404 on the public embed route.
@@ -321,6 +325,11 @@ model ManagedPosition {
   /// Airtable Position record id, for import idempotency. Nothing is ever
   /// written back to Airtable.
   airtableId String?       @unique
+  /// Stable key for an import that is not Airtable's — currently the published
+  /// track-record sheets. Separate from airtableId because the two name records
+  /// in different systems, and re-running either import must not create a
+  /// second copy of the same trade.
+  externalKey String?      @unique
 
   legs       ManagedLeg[]
   executions ManagedExecution[]

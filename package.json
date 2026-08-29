@@ -15,6 +15,7 @@
     "seed:demo": "node --import tsx --env-file=.env scripts/seed-demo-portfolio.ts",
     "import:plan": "node --import tsx --env-file=.env scripts/import-plan.ts",
     "import:commit": "node --import tsx --env-file=.env scripts/import-commit.ts",
+    "import:sheets": "node --import tsx --env-file=.env scripts/import-sheets.ts",
     "prices": "node --import tsx --env-file=.env scripts/refresh-prices.ts",
     "test:manual": "node --import tsx --env-file=.env scripts/test-manual-price.ts",
     "backfill:owners": "node --import tsx --env-file=.env scripts/backfill-owners.ts",

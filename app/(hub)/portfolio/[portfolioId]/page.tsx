@@ -8,7 +8,7 @@ import { benchmarkSince } from "@/lib/managed/benchmark";
 import { BENCHMARKS, benchmarkLabel } from "@/lib/publications";
 import NoManageAccess from "../../NoManageAccess";
 import { StatBar } from "../../StatBar";
-import EmbedBuilder from "./EmbedBuilder";
+import EmbedBuilder from "../../EmbedBuilder";
 import ActionForm from "../../ActionForm";
 import AddPositionForm from "./AddPositionForm";
 import {
@@ -213,6 +213,7 @@ export default async function PortfolioPage({
           Pick what to show, then copy the code into any page.
         </p>
         <EmbedBuilder
+          mode="portfolio"
           slug={portfolio.slug}
           origin={origin}
           isPublic={portfolio.visibility === "PUBLIC"}
