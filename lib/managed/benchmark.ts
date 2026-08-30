@@ -144,6 +144,131 @@ export function earliestStart(
   return starts.length ? starts.reduce((a, b) => (b < a ? b : a)) : null;
 }
 
+/**
+ * Every daily close for a ticker over a window, for per-position comparison.
+ *
+ * WHY IN BULK
+ *   Comparing each position against the index over its OWN holding window needs
+ *   two closes per position. Daily Profits Live has 3,659 positions; asking for
+ *   those one at a time would be thousands of requests. The aggregates endpoint
+ *   returns years of daily bars in a SINGLE call, and a past close never
+ *   changes, so the whole range is cached permanently and every later lookup is
+ *   a plain array search.
+ *
+ * Incremental: only the span after the newest cached bar is fetched, so a warm
+ * cache costs one small request for the last few days.
+ */
+export async function warmBenchmarkRange(
+  ticker: string,
+  from: Date,
+  to: Date,
+): Promise<number> {
+  const key = process.env.MASSIVE_API_KEY;
+  if (!key) return 0;
+
+  const newest = await prisma.benchmarkClose.findFirst({
+    where: { ticker, date: { gte: from, lte: to } },
+    orderBy: { date: "desc" },
+    select: { date: true },
+  });
+  const start = newest
+    ? new Date(Math.max(newest.date.getTime(), from.getTime()))
+    : from;
+  if (start > to) return 0;
+
+  try {
+    const url =
+      `${BASE()}/v2/aggs/ticker/${encodeURIComponent(ticker)}` +
+      `/range/1/day/${ymd(start)}/${ymd(to)}?sort=asc&limit=50000`;
+    const res = await fetch(url, {
+      headers: { Authorization: `Bearer ${key}` },
+      cache: "no-store",
+      signal: AbortSignal.timeout(30_000),
+    });
+    if (!res.ok) return 0;
+    const body = (await res.json()) as { results?: { c?: number; t?: number }[] };
+    const bars = (body.results ?? []).filter(
+      (b) => typeof b.c === "number" && typeof b.t === "number",
+    );
+    if (bars.length === 0) return 0;
+
+    const rows = bars.map((b) => {
+      const d = new Date(b.t!);
+      return {
+        ticker,
+        date: new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate())),
+        close: b.c!.toString(),
+      };
+    });
+    const written = await prisma.benchmarkClose.createMany({
+      data: rows,
+      skipDuplicates: true,
+    });
+    return written.count;
+  } catch {
+    // A benchmark is context, never the headline. A failed warm leaves the
+    // series short and the caller shows fewer comparisons, rather than failing.
+    return 0;
+  }
+}
+
+/**
+ * A ticker's cached closes, with lookup by date.
+ *
+ * `on()` returns the last close ON OR BEFORE the date, which is what makes a
+ * position opened on a weekend or a market holiday comparable at all — there is
+ * no bar that day, and the honest starting point is the last session that
+ * actually traded.
+ */
+export interface BenchmarkSeries {
+  ticker: string;
+  count: number;
+  on(date: Date): D | null;
+  latest(): D | null;
+}
+
+export async function loadBenchmarkSeries(
+  ticker: string,
+  from: Date,
+  to: Date = new Date(),
+): Promise<BenchmarkSeries> {
+  await warmBenchmarkRange(ticker, from, to);
+  const rows = await prisma.benchmarkClose.findMany({
+    where: { ticker, date: { lte: to } },
+    orderBy: { date: "asc" },
+    select: { date: true, close: true },
+  });
+  const times = rows.map((r) => r.date.getTime());
+  const closes = rows.map((r) => dec(r.close.toString()));
+
+  return {
+    ticker,
+    count: rows.length,
+    on(date: Date) {
+      const t = Date.UTC(
+        date.getUTCFullYear(),
+        date.getUTCMonth(),
+        date.getUTCDate(),
+      );
+      // Last index with time <= t, by binary search.
+      let lo = 0;
+      let hi = times.length - 1;
+      let found = -1;
+      while (lo <= hi) {
+        const mid = (lo + hi) >> 1;
+        if (times[mid] <= t) {
+          found = mid;
+          lo = mid + 1;
+        } else hi = mid - 1;
+      }
+      return found >= 0 ? closes[found] : null;
+    },
+    latest() {
+      return closes.length ? closes[closes.length - 1] : null;
+    },
+  };
+}
+
 export interface BenchmarkComparison {
   ticker: string;
   /** Fractional return over the same window as the portfolio. */

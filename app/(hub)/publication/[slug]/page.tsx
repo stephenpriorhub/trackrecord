@@ -9,10 +9,12 @@ import {
   isAppLevel,
 } from "@/lib/authz";
 import { statsByPortfolio, serviceStats } from "@/lib/managed/stats";
+import { keyMetrics } from "@/lib/managed/key-metrics";
 import { benchmarkSince, startFor, earliestStart } from "@/lib/managed/benchmark";
 import { DEFAULT_BENCHMARK, benchmarkLabel } from "@/lib/publications";
 import NoManageAccess from "../../NoManageAccess";
 import { StatBar } from "../../StatBar";
+import { KeyMetricsPanel } from "../../KeyMetrics";
 import ActionForm from "../../ActionForm";
 import EmbedBuilder from "../../EmbedBuilder";
 import { createPortfolioAction, archivePortfolioAction, reorderPortfolioAction } from "../../actions";
@@ -70,6 +72,13 @@ export default async function PublicationPage({
     })
   );
 
+  // One benchmark row per index the publication's books actually compare
+  // against, matching the source panel's table.
+  const metrics = await keyMetrics(
+    service.id,
+    service.portfolios.filter((p) => p.showBenchmark).map((p) => p.benchmarkTicker)
+  );
+
   const canAddPortfolio = await canManageService(scope, service.id);
   const origin =
     process.env.NEXT_PUBLIC_APP_ORIGIN ?? "https://trackrecord.oxfordhub.app";
@@ -94,6 +103,8 @@ export default async function PublicationPage({
         </h3>
         <StatBar stats={overall} benchmark={headlineBenchmark} showBenchmark />
       </section>
+
+      <KeyMetricsPanel m={metrics} />
 
       <section className="space-y-5">
         <h3 className="text-xs uppercase tracking-wide text-gray-500">
