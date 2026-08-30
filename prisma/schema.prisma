@@ -272,6 +272,24 @@ model ManagedPortfolio {
   /// re-run of the import updates rather than duplicates.
   airtableTradeGroupId String? @unique
 
+  /// Google Sheet id when this book's record is maintained in a spreadsheet
+  /// rather than Airtable — Nate Bear's three services work this way.
+  ///
+  /// Held per portfolio rather than in a constant map so a book can be pointed
+  /// at a different sheet, or detached from one, without a deploy.
+  sourceSheetId String?
+
+  /// When the one-way sync last pulled from Airtable or the sheet.
+  ///
+  /// The sync only ever READS its source. Nothing here is written back, so a
+  /// source can be disconnected at any time and the positions simply stay as
+  /// they are — which is the point: this app is meant to outlive the
+  /// spreadsheets it is currently fed by.
+  syncedAt      DateTime?
+  /// What the last sync run reported, for the settings panel. Null before the
+  /// first run.
+  syncNote      String?
+
   positions   ManagedPosition[]
   assignments PortfolioAssignment[]
   changes     ChangeLog[]

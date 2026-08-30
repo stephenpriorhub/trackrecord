@@ -5,6 +5,7 @@ import { getManageContext } from "@/lib/manage-context";
 import { canManagePortfolio, canManageAnything } from "@/lib/authz";
 import { portfolioStats } from "@/lib/managed/stats";
 import { benchmarkSince } from "@/lib/managed/benchmark";
+import { portfolioSource, positionSourceUrl } from "@/lib/managed/source";
 import { BENCHMARKS, benchmarkLabel } from "@/lib/publications";
 import NoManageAccess from "../../NoManageAccess";
 import { StatBar } from "../../StatBar";
@@ -146,6 +147,7 @@ export default async function PortfolioPage({
         title="Open positions"
         positions={open}
         empty="Nothing open yet."
+        source={portfolio}
         showClose
       />
 
@@ -157,6 +159,7 @@ export default async function PortfolioPage({
         }
         positions={closed}
         empty="Nothing closed yet."
+        source={portfolio}
       />
 
       <section className="rounded-xl border border-gray-800 bg-gray-900 p-5">
@@ -259,6 +262,8 @@ export default async function PortfolioPage({
         </ActionForm>
       </section>
 
+      <SourcePanel portfolio={portfolio} />
+
       <section className="rounded-xl border border-gray-800 bg-gray-900 p-5">
         <h3 className="mb-1 font-semibold">Embed this portfolio</h3>
         <p className="mb-4 max-w-prose text-xs text-gray-500">
@@ -291,6 +296,9 @@ type PositionRow = {
   cachedUnpriced: boolean;
   cachedManualPriced: boolean;
   guru: { name: string } | null;
+  /** Source identifiers, for the "open at source" link. */
+  airtableId: string | null;
+  externalKey: string | null;
   buyUpToPrice: unknown;
   stopLossPrice: unknown;
   legs: {
@@ -316,16 +324,74 @@ type PositionRow = {
   }[];
 };
 
+/**
+ * Where this book's positions come from.
+ *
+ * Stated plainly, including when the answer is "nowhere" — a hand-maintained
+ * portfolio is the intended end state for all of these, not a misconfiguration,
+ * so it reads as normal rather than as a warning.
+ */
+function SourcePanel({
+  portfolio,
+}: {
+  portfolio: {
+    airtableTradeGroupId: string | null;
+    sourceSheetId: string | null;
+    syncedAt: Date | null;
+    syncNote: string | null;
+  };
+}) {
+  const src = portfolioSource(portfolio);
+  return (
+    <section className="rounded-xl border border-gray-800 bg-gray-900 p-5">
+      <h3 className="mb-1 font-semibold">Source</h3>
+      {src.system === "MANUAL" ? (
+        <p className="max-w-prose text-sm text-gray-400">
+          Maintained here. Positions are whatever editors enter — nothing is
+          pulled from anywhere else.
+        </p>
+      ) : (
+        <>
+          <p className="max-w-prose text-sm text-gray-400">
+            Fed one way from {src.label}. New and changed positions are pulled
+            in; nothing is ever written back, so the source is never altered by
+            this app.
+          </p>
+          <p className="mt-2 text-xs text-gray-500">
+            {src.syncedAt
+              ? `Last pulled ${src.syncedAt.toLocaleString("en-US", { timeZone: "America/New_York" })} ET`
+              : "Not pulled yet."}
+            {src.note ? ` · ${src.note}` : ""}
+          </p>
+          {src.url && (
+            <a
+              href={src.url}
+              target="_blank"
+              rel="noreferrer"
+              className="mt-2 inline-block text-sm text-blue-400 hover:underline"
+            >
+              Open in {src.label} ↗
+            </a>
+          )}
+        </>
+      )}
+    </section>
+  );
+}
+
 function PositionTable({
   title,
   positions,
   empty,
   showClose,
+  source,
 }: {
   title: string;
   positions: PositionRow[];
   empty: string;
   showClose?: boolean;
+  /** The portfolio's source ids, so a row can link back to where it came from. */
+  source: { airtableTradeGroupId: string | null; sourceSheetId: string | null };
 }) {
   return (
     <section className="rounded-xl border border-gray-800 bg-gray-900">
@@ -339,6 +405,7 @@ function PositionTable({
         <ul className="divide-y divide-gray-800/60">
           {positions.map((p) => {
             const ret = pctSimple(p.cachedReturnPct);
+            const link = positionSourceUrl(p, source);
             return (
               <li key={p.id} className="px-5 py-4">
                 <div className="flex flex-wrap items-start gap-4">
@@ -369,8 +436,20 @@ function PositionTable({
                     )}
                   </div>
 
-                  <div className={`text-lg font-bold ${ret.cls}`}>
-                    {ret.text}
+                  <div className="text-right">
+                    <div className={`text-lg font-bold ${ret.cls}`}>
+                      {ret.text}
+                    </div>
+                    {link && (
+                      <a
+                        href={link.url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="mt-0.5 block text-xs text-blue-400 hover:underline"
+                      >
+                        {link.label} ↗
+                      </a>
+                    )}
                   </div>
                 </div>
 
