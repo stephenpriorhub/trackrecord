@@ -51,6 +51,12 @@ export default function EmbedBody({ view }: { view: EmbedView }) {
                 <span>
                   <strong>{view.benchmarkTicker}:</strong>{" "}
                   <Pct v={view.benchmarkReturn} />
+                  {/* The window, because "+12%" is meaningless without it —
+                      and because it is what shows the two figures cover the
+                      same period. */}
+                  {view.benchmarkFrom && (
+                    <span className="dim"> since {day(view.benchmarkFrom)}</span>
+                  )}
                 </span>
               )}
             </p>

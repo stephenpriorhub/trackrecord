@@ -88,6 +88,17 @@ export async function updatePortfolioAction(form: FormData): Promise<ActionResul
   const visibility = str(form.get("visibility")) === "PUBLIC" ? "PUBLIC" : "PRIVATE";
   const showBenchmark = str(form.get("showBenchmark")) !== "0";
 
+  // Empty clears it, which restores the "earliest entry date" default rather
+  // than leaving the old value stuck. An unparseable date is ignored so a
+  // fat-fingered entry cannot silently move the benchmark window.
+  const startRaw = str(form.get("startDate"));
+  let startDate: Date | null = before.startDate;
+  if (startRaw === "") startDate = null;
+  else if (/^\d{4}-\d{2}-\d{2}$/.test(startRaw)) {
+    const parsed = new Date(`${startRaw}T00:00:00Z`);
+    if (!Number.isNaN(parsed.getTime())) startDate = parsed;
+  }
+
   // Only a benchmark we actually know how to price. A free-text ticker would
   // silently produce no comparison at all, which reads as a bug rather than a
   // typo, so an unrecognised value keeps the current one.
@@ -98,7 +109,14 @@ export async function updatePortfolioAction(form: FormData): Promise<ActionResul
 
   const after = await prisma.managedPortfolio.update({
     where: { id },
-    data: { name, benchmarkTicker, description, visibility, showBenchmark },
+    data: {
+      name,
+      benchmarkTicker,
+      description,
+      visibility,
+      showBenchmark,
+      startDate,
+    },
   });
 
   await logChange({
@@ -111,6 +129,7 @@ export async function updatePortfolioAction(form: FormData): Promise<ActionResul
       name: before.name,
       benchmarkTicker: before.benchmarkTicker,
       showBenchmark: before.showBenchmark,
+      startDate: before.startDate,
       visibility: before.visibility,
       description: before.description,
     },
@@ -118,6 +137,7 @@ export async function updatePortfolioAction(form: FormData): Promise<ActionResul
       name: after.name,
       benchmarkTicker: after.benchmarkTicker,
       showBenchmark: after.showBenchmark,
+      startDate: after.startDate,
       visibility: after.visibility,
       description: after.description,
     },

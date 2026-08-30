@@ -43,17 +43,15 @@ export default function EmbedBuilder({
   const [limit, setLimit] = useState(200);
   const [copied, setCopied] = useState(false);
 
-  // Only published books can appear, so selection starts as exactly what a
-  // visitor would see. Ticking is then a way to REMOVE a book from this page,
-  // which is what "in some cases a sub-portfolio may be excluded" needs.
+  // The embed shows every published book by default and the URL names only what
+  // to LEAVE OUT. That way a portfolio added next month appears automatically in
+  // pages that already embed this publication — an include-list would freeze
+  // today's line-up into every live iframe.
   const publishable = books.filter((b) => b.isPublic);
-  const [selected, setSelected] = useState<string[]>(() =>
-    publishable.map((b) => b.slug),
-  );
-  const allSelected = selected.length === publishable.length;
+  const [hidden, setHidden] = useState<string[]>([]);
 
-  function toggleBook(s: string) {
-    setSelected((prev) =>
+  function toggleHidden(s: string) {
+    setHidden((prev) =>
       prev.includes(s) ? prev.filter((x) => x !== s) : [...prev, s],
     );
   }
@@ -67,9 +65,7 @@ export default function EmbedBuilder({
     if (limit !== 200) p.set("limit", String(limit));
     if (mode === "service") {
       if (!bookColumn) p.set("portfolio", "0");
-      // Omitted when everything is included: the embed should keep picking up
-      // books added later, rather than freezing today's list into the URL.
-      if (!allSelected) p.set("only", selected.join(","));
+      if (hidden.length) p.set("hide", hidden.join(","));
     }
     const qs = p.toString();
     const path = mode === "service" ? "s" : "p";
@@ -83,8 +79,7 @@ export default function EmbedBuilder({
     comments,
     limit,
     bookColumn,
-    allSelected,
-    selected,
+    hidden,
   ]);
 
   // Preview carries an extra flag the public URL must not have: it renders
@@ -117,7 +112,8 @@ export default function EmbedBuilder({
     }
   }
 
-  const nothingSelected = mode === "service" && selected.length === 0;
+  const nothingSelected =
+    mode === "service" && publishable.length > 0 && hidden.length === publishable.length;
 
   return (
     <div className="space-y-4">
@@ -132,25 +128,32 @@ export default function EmbedBuilder({
       {mode === "service" && (
         <div>
           <div className="mb-1.5 text-xs uppercase tracking-wide text-gray-500">
-            Portfolios included
+            Hide from this embed
           </div>
           {publishable.length === 0 ? (
             <p className="text-xs text-gray-500">
               Nothing published yet — every portfolio here is private.
             </p>
           ) : (
-            <div className="flex flex-wrap gap-1.5">
-              {publishable.map((b) => (
-                <Choice
-                  key={b.slug}
-                  active={selected.includes(b.slug)}
-                  onClick={() => toggleBook(b.slug)}
-                >
-                  {b.name}{" "}
-                  <span className="opacity-60">{b.positions}</span>
-                </Choice>
-              ))}
-            </div>
+            <>
+              <div className="flex flex-wrap gap-1.5">
+                {publishable.map((b) => (
+                  <Choice
+                    key={b.slug}
+                    active={hidden.includes(b.slug)}
+                    danger
+                    onClick={() => toggleHidden(b.slug)}
+                  >
+                    {b.name} <span className="opacity-60">{b.positions}</span>
+                  </Choice>
+                ))}
+              </div>
+              <p className="mt-1.5 text-xs text-gray-600">
+                {hidden.length === 0
+                  ? "All portfolios shown. Portfolios added later appear here automatically."
+                  : `${hidden.length} hidden on this page only — the portfolio itself is unchanged.`}
+              </p>
+            </>
           )}
           {books.some((b) => !b.isPublic) && (
             <p className="mt-1.5 text-xs text-gray-600">
@@ -216,7 +219,7 @@ export default function EmbedBuilder({
         </div>
         {nothingSelected ? (
           <p className="rounded-lg border border-gray-800 bg-gray-950 p-3 text-xs text-gray-500">
-            Select at least one portfolio.
+            Every portfolio is hidden — leave at least one showing.
           </p>
         ) : (
           <pre className="overflow-x-auto rounded-lg border border-gray-800 bg-gray-950 p-3 text-xs leading-relaxed text-gray-300">
@@ -263,10 +266,13 @@ function Choice({
   active,
   onClick,
   children,
+  danger = false,
 }: {
   active: boolean;
   onClick: () => void;
   children: React.ReactNode;
+  /** Active means "excluded" rather than "chosen", so it reads as a removal. */
+  danger?: boolean;
 }) {
   return (
     <button
@@ -275,7 +281,9 @@ function Choice({
       aria-pressed={active}
       className={`rounded-full px-3 py-1.5 text-xs font-medium transition-colors ${
         active
-          ? "bg-blue-600 text-white"
+          ? danger
+            ? "bg-red-900/70 text-red-200 line-through"
+            : "bg-blue-600 text-white"
           : "border border-gray-700 bg-gray-800 text-gray-400 hover:text-gray-200"
       }`}
     >

@@ -103,8 +103,13 @@ export default async function PortfolioPage({
   ]);
 
   const stats = await portfolioStats(portfolio.id);
+  // Same window the embed uses: the explicit start date if set, otherwise the
+  // earliest entry. The two views must never disagree about the comparison.
   const benchmark = portfolio.showBenchmark
-    ? await benchmarkSince(portfolio.benchmarkTicker, stats.since)
+    ? await benchmarkSince(
+        portfolio.benchmarkTicker,
+        portfolio.startDate ?? stats.since,
+      )
     : null;
   const origin = process.env.NEXT_PUBLIC_APP_ORIGIN ?? "https://trackrecord.oxfordhub.app";
 
@@ -216,6 +221,28 @@ export default async function PortfolioPage({
                 <option value="1">Yes</option>
                 <option value="0">No</option>
               </select>
+            </label>
+            <label className="flex flex-col gap-1">
+              <span className="text-xs uppercase tracking-wide text-gray-500">
+                Start date
+              </span>
+              <input
+                type="date"
+                name="startDate"
+                defaultValue={
+                  portfolio.startDate
+                    ? portfolio.startDate.toISOString().slice(0, 10)
+                    : ""
+                }
+                className="w-44 rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-white"
+              />
+              <span className="text-xs text-gray-600">
+                {portfolio.startDate
+                  ? "Clear to use the earliest entry"
+                  : stats.since
+                    ? `Earliest entry: ${stats.since.toLocaleDateString("en-US", { timeZone: "UTC" })}`
+                    : "No positions yet"}
+              </span>
             </label>
             <label className="flex flex-col gap-1">
               <span className="text-xs uppercase tracking-wide text-gray-500">Embed</span>

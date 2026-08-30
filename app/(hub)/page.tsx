@@ -2,8 +2,8 @@ import Link from "next/link";
 import { prisma } from "@/lib/prisma";
 import { getManageContext } from "@/lib/manage-context";
 import { canManageAnything, isAppLevel, portfolioScopeFilter } from "@/lib/authz";
-import { statsByService, type Stats } from "@/lib/managed/stats";
-import { benchmarkSince } from "@/lib/managed/benchmark";
+import { statsByService, statsByPortfolio, type Stats } from "@/lib/managed/stats";
+import { benchmarkSince, earliestStart } from "@/lib/managed/benchmark";
 import { seedServicesFromTrackRecord } from "@/lib/managed/seed";
 import { DEFAULT_BENCHMARK } from "@/lib/publications";
 import NoManageAccess from "./NoManageAccess";
@@ -32,12 +32,18 @@ export default async function PublicationsPage() {
       gurus: { include: { guru: true } },
       portfolios: {
         where: { archivedAt: null, ...(scopeFilter ?? {}) },
-        select: { id: true, benchmarkTicker: true },
+        select: { id: true, benchmarkTicker: true, startDate: true },
       },
     },
   });
 
   const stats = await statsByService(services.map((s) => s.id));
+  // Per-portfolio stats too, purely for their earliest open dates: a
+  // publication's benchmark window opens with whichever of its books started
+  // first, and each book resolves its own start date before that comparison.
+  const perPortfolio = await statsByPortfolio(
+    services.flatMap((s) => s.portfolios.map((p) => p.id))
+  );
 
   // One benchmark per publication: whatever most of its portfolios compare
   // against, so the headline matches what the reader sees inside.
@@ -45,7 +51,14 @@ export default async function PublicationsPage() {
     services.map(async (s) => {
       const st = stats.get(s.id) ?? null;
       const ticker = commonBenchmark(s.portfolios.map((p) => p.benchmarkTicker));
-      const benchmark = st ? await benchmarkSince(ticker, st.since) : null;
+      const from =
+        earliestStart(
+          s.portfolios.map((p) => ({
+            startDate: p.startDate,
+            earliestOpen: perPortfolio.get(p.id)?.since ?? null,
+          }))
+        ) ?? st?.since ?? null;
+      const benchmark = st ? await benchmarkSince(ticker, from) : null;
       return { service: s, stats: st, benchmark };
     })
   );

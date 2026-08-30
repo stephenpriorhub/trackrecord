@@ -17,6 +17,7 @@
  */
 import { prisma } from "../prisma";
 import { dec, ZERO, type D } from "../money";
+import { benchmarkSince, earliestStart } from "./benchmark";
 
 export type ShowMode = "open" | "closed" | "both";
 
@@ -26,11 +27,16 @@ export interface EmbedOptions {
   returns: boolean;
   comments: boolean;
   /**
-   * Portfolio slugs to include in a service embed; null means every eligible
-   * one. This is a DISPLAY filter layered on top of visibility, never a way
-   * around it — a PRIVATE portfolio stays out whether or not it is named here.
+   * Portfolio slugs to LEAVE OUT of a service embed.
+   *
+   * Exclusion rather than inclusion on purpose: a service embed should show the
+   * whole publication, so a portfolio added next month appears on every page
+   * that already embeds it without anyone editing a URL. An include-list would
+   * silently freeze today's line-up into every existing iframe.
+   *
+   * It can only ever subtract from what visibility already allows.
    */
-  only: string[] | null;
+  hide: string[];
   /**
    * Whether rows carry the portfolio they came from. On by default for a
    * service embed, where a merged table is ambiguous without it, and never
@@ -63,17 +69,17 @@ export function parseEmbedOptions(
   const show = one(sp.show);
   const off = (v: string | undefined) =>
     v === "0" || v === "false" || v === "no";
-  const only = one(sp.only);
+  const hide = one(sp.hide);
   return {
     show: show === "open" || show === "closed" ? show : "both",
     returns: !off(one(sp.returns)),
     comments: !off(one(sp.comments)),
-    only: only
-      ? only
+    hide: hide
+      ? hide
           .split(",")
           .map((s) => s.trim())
           .filter(Boolean)
-      : null,
+      : [],
     portfolioColumn: !off(one(sp.portfolio)),
     limit: (() => {
       const raw = one(sp.limit);
@@ -112,6 +118,12 @@ export interface EmbedView {
   serviceName: string;
   benchmarkTicker: string;
   showBenchmark: boolean;
+  /**
+   * The date the benchmark return is measured from — the portfolio's start date
+   * if one is set, otherwise its earliest position open date. Rendered next to
+   * the figure, because "+12%" means nothing without the window it covers.
+   */
+  benchmarkFrom: Date | null;
   /** The books this view is built from, in display order. */
   included: { id: string; name: string; slug: string; positions: number }[];
   /**
@@ -165,6 +177,25 @@ function meanReturn(rows: EmbedRow[]): D | null {
     .filter((v): v is D => v !== null);
   if (present.length === 0) return null;
   return present.reduce((a, b) => a.plus(b), ZERO).div(present.length);
+}
+
+/** The embed's benchmark window — see startFor/earliestStart in benchmark.ts. */
+function benchmarkStartFor(
+  portfolios: { startDate: Date | null; positions: { openedAt: Date }[] }[],
+): Date | null {
+  return earliestStart(
+    portfolios.map((p) => ({
+      startDate: p.startDate,
+      earliestOpen: earliestOpen(p.positions),
+    })),
+  );
+}
+
+function earliestOpen(positions: { openedAt: Date }[]): Date | null {
+  return positions.reduce<Date | null>(
+    (acc, p) => (acc === null || p.openedAt < acc ? p.openedAt : acc),
+    null,
+  );
 }
 
 /**
@@ -258,9 +289,9 @@ export async function loadPortfolioEmbed(
  * A whole publication's embed: every eligible portfolio merged into one pair of
  * tables.
  *
- * Eligibility is visibility FIRST and selection second. `only` can narrow what a
- * page shows, but a PRIVATE book is never published by being named in a query
- * string — otherwise anyone could guess a slug and read an unpublished book out
+ * Eligibility is visibility FIRST and selection second. `hide` can narrow what a
+ * page shows, but a PRIVATE book is never published by being left out of that
+ * list — otherwise anyone could guess a slug and read an unpublished book out
  * of a service embed.
  */
 export async function loadServiceEmbed(
@@ -279,8 +310,8 @@ export async function loadServiceEmbed(
     ...(allowPrivate ? {} : { visibility: "PUBLIC", archivedAt: null }),
   });
 
-  const eligible = options.only
-    ? all.filter((p) => options.only!.includes(p.slug))
+  const eligible = options.hide.length
+    ? all.filter((p) => !options.hide.includes(p.slug))
     : all;
   // An empty service embed is a wrong link, not a blank page: 404 rather than
   // publish a table with nothing in it.
@@ -408,23 +439,21 @@ async function buildView(
   const closedShown =
     meta.options.limit > 0 ? closed.slice(0, meta.options.limit) : closed;
 
-  const benchmark = await prisma.marketInstrument.findUnique({
-    where: { ticker: meta.benchmarkTicker },
-    select: { lastPrice: true, prevClose: true },
-  });
-
-  // Benchmark move on the same data the positions are priced from. Session
-  // change only — a like-for-like since-inception benchmark needs a historical
-  // bar the current Massive plan does not provide, and inventing one would be
-  // worse than showing none.
-  let benchmarkReturn: D | null = null;
-  const bLast = d(benchmark?.lastPrice);
-  const bPrev = d(benchmark?.prevClose);
-  if (bLast && bPrev && !bPrev.isZero()) {
-    benchmarkReturn = bLast.minus(bPrev).div(bPrev);
-  }
-
   const allPositions = portfolios.flatMap((p) => p.positions);
+
+  // The benchmark runs from the portfolio's start date to now — the same window
+  // the positions cover.
+  //
+  // This used to be the index's SESSION change, which put one day of SPY next
+  // to a multi-year portfolio return and rendered "+0.00%" whenever the last
+  // price equalled the previous close. lib/managed/benchmark.ts has been able
+  // to read historical daily closes all along; the embed simply was not asking
+  // it.
+  const benchmarkFrom = benchmarkStartFor(portfolios);
+  const comparison = meta.showBenchmark
+    ? await benchmarkSince(meta.benchmarkTicker, benchmarkFrom)
+    : null;
+  const benchmarkReturn = comparison?.return ?? null;
 
   return {
     kind: meta.kind,
@@ -432,6 +461,7 @@ async function buildView(
     serviceName: meta.serviceName,
     benchmarkTicker: meta.benchmarkTicker,
     showBenchmark: meta.showBenchmark,
+    benchmarkFrom,
     included: portfolios.map((p) => ({
       id: p.id,
       name: p.name,

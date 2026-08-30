@@ -109,6 +109,41 @@ async function latestClose(ticker: string): Promise<D | null> {
   }
 }
 
+/**
+ * Where a benchmark comparison starts for ONE portfolio.
+ *
+ * An explicit startDate is a deliberate statement about when the book began and
+ * always wins; otherwise the window opens at the earliest position. Null when
+ * there is neither, which means there is nothing to compare yet.
+ *
+ * What this never does is change how a POSITION's return is measured. Each is
+ * computed from its own entry, so a holding opened last month inside a book
+ * that started two years ago contributes only last month's gain. Moving the
+ * start date earlier lengthens the index's window, never a position's.
+ */
+export function startFor(
+  startDate: Date | null | undefined,
+  earliestOpen: Date | null | undefined,
+): Date | null {
+  return startDate ?? earliestOpen ?? null;
+}
+
+/**
+ * The earliest start across several portfolios, for a whole-publication figure.
+ *
+ * Each portfolio resolves its OWN start first. Taking the minimum of the
+ * explicit dates alone would drop a book that has none out of the window
+ * entirely.
+ */
+export function earliestStart(
+  items: { startDate: Date | null; earliestOpen: Date | null }[],
+): Date | null {
+  const starts = items
+    .map((i) => startFor(i.startDate, i.earliestOpen))
+    .filter((d): d is Date => d !== null);
+  return starts.length ? starts.reduce((a, b) => (b < a ? b : a)) : null;
+}
+
 export interface BenchmarkComparison {
   ticker: string;
   /** Fractional return over the same window as the portfolio. */

@@ -9,7 +9,7 @@ import {
   isAppLevel,
 } from "@/lib/authz";
 import { statsByPortfolio, serviceStats } from "@/lib/managed/stats";
-import { benchmarkSince } from "@/lib/managed/benchmark";
+import { benchmarkSince, startFor, earliestStart } from "@/lib/managed/benchmark";
 import { DEFAULT_BENCHMARK, benchmarkLabel } from "@/lib/publications";
 import NoManageAccess from "../../NoManageAccess";
 import { StatBar } from "../../StatBar";
@@ -48,15 +48,24 @@ export default async function PublicationPage({
   const overall = await serviceStats(service.id);
   const perPortfolio = await statsByPortfolio(service.portfolios.map((p) => p.id));
 
+  // The publication's window opens with the EARLIEST of its portfolios, each
+  // resolving its own start date first — see startFor in benchmark.ts.
   const headlineBenchmark = await benchmarkSince(
     service.portfolios[0]?.benchmarkTicker ?? DEFAULT_BENCHMARK,
-    overall.since
+    earliestStart(
+      service.portfolios.map((p) => ({
+        startDate: p.startDate,
+        earliestOpen: perPortfolio.get(p.id)?.since ?? null,
+      }))
+    ) ?? overall.since
   );
 
   const rows = await Promise.all(
     service.portfolios.map(async (p) => {
       const st = perPortfolio.get(p.id)!;
-      const bench = p.showBenchmark ? await benchmarkSince(p.benchmarkTicker, st.since) : null;
+      const bench = p.showBenchmark
+        ? await benchmarkSince(p.benchmarkTicker, startFor(p.startDate, st.since))
+        : null;
       return { portfolio: p, stats: st, bench };
     })
   );

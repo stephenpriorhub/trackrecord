@@ -255,6 +255,19 @@ model ManagedPortfolio {
   /// measure against, so it is a per-portfolio choice rather than always-on.
   showBenchmark   Boolean @default(true)
 
+  /// When this portfolio started, for the benchmark comparison.
+  ///
+  /// NULL means "the earliest position open date", which is right for almost
+  /// every book and keeps working as positions are added. Set it explicitly
+  /// only when the book has a launch date earlier than its first trade, or when
+  /// early positions should not define the window.
+  ///
+  /// It moves ONLY the benchmark's window. Each position's own return is always
+  /// measured from its own entry, so a holding added later contributes only the
+  /// gain it actually earned — setting an earlier start date can never
+  /// retroactively credit it with the index's head start.
+  startDate       DateTime? @db.Date
+
   /// Set when this portfolio was seeded from an Airtable Trade Group, so a
   /// re-run of the import updates rather than duplicates.
   airtableTradeGroupId String? @unique
