@@ -11,6 +11,13 @@
 import { useMemo, useState } from "react";
 
 type Show = "both" | "open" | "closed";
+type Summary = "benchmark" | "portfolio" | "none";
+
+const SUMMARY_LABELS: Record<Summary, string> = {
+  benchmark: "Portfolio vs S&P 500",
+  portfolio: "Portfolio only",
+  none: "None",
+};
 
 export interface EmbedBook {
   slug: string;
@@ -36,6 +43,7 @@ export default function EmbedBuilder({
 }) {
   const [show, setShow] = useState<Show>("both");
   const [returns, setReturns] = useState(true);
+  const [summary, setSummary] = useState<Summary>("benchmark");
   const [comments, setComments] = useState(true);
   const [bookColumn, setBookColumn] = useState(true);
   const [autoHeight, setAutoHeight] = useState(true);
@@ -61,6 +69,9 @@ export default function EmbedBuilder({
     // Only non-default values go in, so the common case is a clean URL.
     if (show !== "both") p.set("show", show);
     if (!returns) p.set("returns", "0");
+    // Always explicit once it differs from the default, so the URL cannot be
+    // read two ways depending on what else is set.
+    if (summary !== "benchmark") p.set("summary", summary);
     if (!comments) p.set("comments", "0");
     if (limit !== 200) p.set("limit", String(limit));
     if (mode === "service") {
@@ -76,6 +87,7 @@ export default function EmbedBuilder({
     mode,
     show,
     returns,
+    summary,
     comments,
     limit,
     bookColumn,
@@ -170,6 +182,14 @@ export default function EmbedBuilder({
           {(["both", "open", "closed"] as Show[]).map((v) => (
             <Choice key={v} active={show === v} onClick={() => setShow(v)}>
               {v === "both" ? "Open + closed" : v === "open" ? "Open only" : "Closed only"}
+            </Choice>
+          ))}
+        </Group>
+
+        <Group label="Header return">
+          {(["benchmark", "portfolio", "none"] as Summary[]).map((v) => (
+            <Choice key={v} active={summary === v} onClick={() => setSummary(v)}>
+              {SUMMARY_LABELS[v]}
             </Choice>
           ))}
         </Group>

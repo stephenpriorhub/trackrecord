@@ -41,24 +41,30 @@ export default function EmbedBody({ view }: { view: EmbedView }) {
               {view.included.map((b) => b.name).join(" · ")}
             </p>
           )}
-          {options.returns && (
+          {options.summary !== "none" && (
             <p className="pf-summary">
               <span>
                 <strong>{view.title.replace(/ Portfolio$/, "")}:</strong>{" "}
                 <Pct v={view.portfolioReturn} />
               </span>
-              {view.showBenchmark && view.benchmarkReturn !== null && (
-                <span>
-                  <strong>{view.benchmarkTicker}:</strong>{" "}
-                  <Pct v={view.benchmarkReturn} />
-                  {/* The window, because "+12%" is meaningless without it —
-                      and because it is what shows the two figures cover the
-                      same period. */}
-                  {view.benchmarkFrom && (
-                    <span className="dim"> since {day(view.benchmarkFrom)}</span>
-                  )}
-                </span>
-              )}
+              {/* Only when the page asked for a comparison AND there is one to
+                  make. A portfolio with the benchmark switched off, or one the
+                  index cannot cover, falls back to its own figure alone rather
+                  than printing a blank next to a label. */}
+              {options.summary === "benchmark" &&
+                view.showBenchmark &&
+                view.benchmarkReturn !== null && (
+                  <span>
+                    <strong>{view.benchmarkTicker}:</strong>{" "}
+                    <Pct v={view.benchmarkReturn} />
+                    {/* The window, because "+12%" is meaningless without it —
+                        and because it is what shows the two figures cover the
+                        same period. */}
+                    {view.benchmarkFrom && (
+                      <span className="dim"> since {day(view.benchmarkFrom)}</span>
+                    )}
+                  </span>
+                )}
             </p>
           )}
           <p className="pf-asof">{asOfLine(view.priceAsOf, view.priceSources)}</p>

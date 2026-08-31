@@ -616,6 +616,85 @@ export async function deletePositionAction(form: FormData): Promise<ActionResult
   return { ok: true, message: restore ? "Restored." : `Removed ${position.label}.` };
 }
 
+// -------------------------------------------------- guidance prices (advisory)
+
+/**
+ * Set or clear a position's Buy Up To and Stop-Loss.
+ *
+ * Editable at any time, unlike a manual market price: these are the editor's own
+ * guidance rather than a substitute for market data, so there is no
+ * "only if there isn't data" rule to enforce. An empty field CLEARS the value —
+ * a stale stop-loss is worse than none, and there has to be a way back to blank.
+ *
+ * Nothing is enforced against them anywhere; they are published as advice.
+ */
+export async function setGuidanceAction(form: FormData): Promise<ActionResult> {
+  const { user, scope } = await actor();
+  const positionId = str(form.get("positionId"));
+  if (!positionId) return { ok: false, error: "Missing position." };
+
+  const position = await prisma.managedPosition.findUnique({
+    where: { id: positionId },
+    select: {
+      portfolioId: true,
+      label: true,
+      buyUpToPrice: true,
+      stopLossPrice: true,
+    },
+  });
+  if (!position) return { ok: false, error: "Position not found." };
+  if (!(await canManagePortfolio(scope, position.portfolioId))) return DENIED;
+
+  // Distinguish "left blank to clear" from "not submitted": a form that omits
+  // the field entirely must not wipe a value it never showed.
+  const raw = (name: string): string | null =>
+    form.has(name) ? str(form.get(name)) : null;
+  const parse = (
+    name: string,
+    current: unknown,
+  ): { value: string | null } | { error: string } => {
+    const v = raw(name);
+    if (v === null) return { value: current === null ? null : String(current) };
+    if (v === "") return { value: null };
+    const n = Number(v);
+    if (!Number.isFinite(n) || n <= 0) {
+      return { error: "Prices must be a number greater than zero." };
+    }
+    return { value: n.toString() };
+  };
+
+  const buy = parse("buyUpToPrice", position.buyUpToPrice);
+  if ("error" in buy) return { ok: false, error: buy.error };
+  const stop = parse("stopLossPrice", position.stopLossPrice);
+  if ("error" in stop) return { ok: false, error: stop.error };
+
+  await prisma.managedPosition.update({
+    where: { id: positionId },
+    data: {
+      buyUpToPrice: buy.value,
+      stopLossPrice: stop.value,
+      updatedByEmail: user?.email ?? null,
+    },
+  });
+
+  await logChange({
+    action: "position.guidance",
+    entity: "ManagedPosition",
+    entityId: positionId,
+    portfolioId: position.portfolioId,
+    actor: user,
+    before: {
+      buyUpToPrice: position.buyUpToPrice,
+      stopLossPrice: position.stopLossPrice,
+    },
+    after: { buyUpToPrice: buy.value, stopLossPrice: stop.value },
+    summary: `Guidance updated on ${position.label}`,
+  });
+
+  revalidatePath(`/portfolio/${position.portfolioId}`);
+  return { ok: true, message: "Saved." };
+}
+
 // ------------------------------------------------------------ manual prices
 
 /**

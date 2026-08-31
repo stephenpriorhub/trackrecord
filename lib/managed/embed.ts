@@ -21,10 +21,25 @@ import { benchmarkSince, earliestStart } from "./benchmark";
 
 export type ShowMode = "open" | "closed" | "both";
 
+/**
+ * What the header states above the tables.
+ *
+ *   benchmark — the portfolio's return next to the index's over the same window
+ *   portfolio — the portfolio's return alone, with nothing to compare it to
+ *   none      — no headline figure at all
+ *
+ * Separate from `returns`, which governs the per-row % column. A page can show
+ * the headline and hide the column, or the reverse: they answer different
+ * editorial questions.
+ */
+export type SummaryMode = "benchmark" | "portfolio" | "none";
+
 export interface EmbedOptions {
   show: ShowMode;
-  /** false hides every % figure, leaving prices only. */
+  /** false hides the per-row % column, leaving prices only. */
   returns: boolean;
+  /** What the header states — see SummaryMode. */
+  summary: SummaryMode;
   comments: boolean;
   /**
    * Portfolio slugs to LEAVE OUT of a service embed.
@@ -73,6 +88,15 @@ export function parseEmbedOptions(
   return {
     show: show === "open" || show === "closed" ? show : "both",
     returns: !off(one(sp.returns)),
+    summary: (() => {
+      const v = one(sp.summary);
+      if (v === "portfolio" || v === "none") return v;
+      // An explicit returns=0 with no summary given means the caller wanted the
+      // percentages gone, so the headline goes too rather than surviving as the
+      // one figure on the page they asked to strip.
+      if (v === undefined && off(one(sp.returns))) return "none";
+      return "benchmark";
+    })(),
     comments: !off(one(sp.comments)),
     hide: hide
       ? hide

@@ -19,6 +19,7 @@ import {
   deletePositionAction,
   updatePortfolioAction,
   setManualPriceAction,
+  setGuidanceAction,
 } from "../../actions";
 
 export const dynamic = "force-dynamic";
@@ -465,6 +466,51 @@ function PositionTable({
                     ))}
                   </ul>
                 )}
+
+                {/* Guidance is the editor's own advice, so it stays editable —
+                    unlike a manual market price, which may only fill a gap.
+                    Blank clears it: a stale stop-loss is worse than none. */}
+                <ActionForm
+                  action={setGuidanceAction}
+                  submitLabel="Save"
+                  variant="quiet"
+                  className="mt-3 flex flex-wrap items-end gap-2"
+                >
+                  <input type="hidden" name="positionId" value={p.id} />
+                  <label className="flex flex-col gap-1">
+                    <span className="text-[11px] uppercase tracking-wide text-gray-500">
+                      Buy up to
+                    </span>
+                    <input
+                      name="buyUpToPrice"
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      defaultValue={
+                        p.buyUpToPrice === null ? "" : String(p.buyUpToPrice)
+                      }
+                      className="w-28 rounded-lg border border-gray-700 bg-gray-800 px-2 py-1.5 text-sm text-white"
+                    />
+                  </label>
+                  <label className="flex flex-col gap-1">
+                    <span className="text-[11px] uppercase tracking-wide text-gray-500">
+                      Stop-loss
+                    </span>
+                    <input
+                      name="stopLossPrice"
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      defaultValue={
+                        p.stopLossPrice === null ? "" : String(p.stopLossPrice)
+                      }
+                      className="w-28 rounded-lg border border-gray-700 bg-gray-800 px-2 py-1.5 text-sm text-white"
+                    />
+                  </label>
+                  <span className="pb-2 text-[11px] text-gray-600">
+                    blank to clear
+                  </span>
+                </ActionForm>
 
                 <div className="mt-3 flex flex-wrap items-end gap-4">
                   <ActionForm
