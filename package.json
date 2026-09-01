@@ -18,6 +18,7 @@
     "import:sheets": "node --import tsx --env-file=.env scripts/import-sheets.ts",
     "verify:sheets": "node --import tsx --env-file=.env scripts/verify-sheet-import.ts",
     "sync:disruptor": "node --import tsx --env-file=.env scripts/sync-disruptor-buy-up-to.ts",
+    "import:d25-rebalance": "node --import tsx --env-file=.env scripts/import-disruptor-rebalance.ts",
     "prices": "node --import tsx --env-file=.env scripts/refresh-prices.ts",
     "test:manual": "node --import tsx --env-file=.env scripts/test-manual-price.ts",
     "backfill:owners": "node --import tsx --env-file=.env scripts/backfill-owners.ts",

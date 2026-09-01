@@ -97,7 +97,11 @@ async function main() {
     where: { slug: PORTFOLIO_SLUG },
     include: {
       positions: {
-        where: { deletedAt: null },
+        // OPEN only. Buy Up To is guidance for a position someone might still
+        // enter, and a name that has left the index is expected to be absent
+        // from the page once it is closed — flagging those would turn the
+        // rebalance warning below into noise the moment it was acted on.
+        where: { deletedAt: null, status: "OPEN" },
         select: { id: true, underlying: true, label: true, buyUpToPrice: true },
       },
     },
@@ -127,14 +131,25 @@ async function main() {
   const held = new Set(portfolio.positions.map((p) => p.underlying.toUpperCase()));
   const unmatchedRows = rows.filter((r) => !held.has(r.ticker.toUpperCase()));
 
-  console.log(`\n${portfolio.name}: ${portfolio.positions.length} positions`);
+  console.log(`\n${portfolio.name}: ${portfolio.positions.length} open positions`);
   console.log(`  would set Buy Up To on ${changes.length}`);
   for (const c of changes) console.log(`    ${c.label.padEnd(10)} ${c.from} -> ${c.to}`);
 
   // Both directions reported: the index is rebalanced quarterly, so a name on
   // one side and not the other is the signal that a change needs making here.
-  if (unmatchedPositions.length)
-    console.log(`\n  held but NOT on the index page (left alone): ${unmatchedPositions.join(", ")}`);
+  if (unmatchedPositions.length) {
+    // A held name that has left the index was rebalanced OUT, and should become
+    // a closed position — that is how the June 2026 rebalance lost six trades
+    // from the record until they were entered by hand. This cannot close them
+    // itself: the index page publishes no exit price, so the figure has to come
+    // from the closed-positions report.
+    console.log(
+      `\n  HELD BUT NO LONGER ON THE INDEX — likely rebalanced out, and still` +
+        ` showing as open:\n    ${unmatchedPositions.join(", ")}` +
+        `\n    Close them with their exit prices from the published` +
+        ` closed-positions report; see scripts/import-disruptor-rebalance.ts.`,
+    );
+  }
   if (unmatchedRows.length)
     console.log(`  on the index page but NOT held: ${unmatchedRows.map((r) => r.ticker).join(", ")}`);
 
