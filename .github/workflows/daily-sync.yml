@@ -20,6 +20,11 @@ on:
         description: "Publications to pull into Portfolio Manager (space-separated)"
         required: false
         default: ""
+      managed_dry_run:
+        description: "Preview the Portfolio Manager pull without writing anything"
+        type: boolean
+        required: false
+        default: true
 
 concurrency:
   group: airtable-sync
@@ -54,6 +59,10 @@ jobs:
           echo "Sync accepted."
 
       - name: Pull Airtable trades into Portfolio Manager
+        # Scheduled runs only once repo variable MANAGED_SYNC_ENABLED is "true",
+        # so nothing is applied before a dry run has been reviewed. A manual run
+        # always works, and previews unless managed_dry_run is unticked.
+        if: ${{ github.event_name == 'workflow_dispatch' || vars.MANAGED_SYNC_ENABLED == 'true' }}
         # The embeds read Portfolio Manager, not the Airtable mirror above. This
         # brings Airtable-sourced positions up to date (new positions, partial
         # exits, closes). See lib/managed/airtable-sync.ts for what it never
@@ -63,16 +72,20 @@ jobs:
           SYNC_API_KEY: ${{ secrets.SYNC_API_KEY }}
           APP_URL: ${{ vars.APP_URL }}
           PUBS: ${{ inputs.managed_pubs || vars.MANAGED_SYNC_PUBS || 'XAI' }}
+          # Scheduled runs have no inputs, so this is only "true" on a manual preview.
+          DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.managed_dry_run }}
         run: |
           set -euo pipefail
           BASE_URL="${APP_URL:-https://trackrecord.oxfordhub.app}"
           for PUB in ${PUBS}; do
+            if [ "${DRY_RUN}" = "true" ]; then QS="pubCode=${PUB}"; OK="200"; else QS="pubCode=${PUB}&apply=1"; OK="202"; fi
             HTTP_CODE=$(curl -sS -o /tmp/managed_resp.txt -w "%{http_code}" \
-              -X POST "${BASE_URL}/api/managed-sync?pubCode=${PUB}&apply=1" \
+              -X POST "${BASE_URL}/api/managed-sync?${QS}" \
               -H "x-sync-key: ${SYNC_API_KEY}" \
-              --max-time 60)
-            echo "${PUB} (${HTTP_CODE}): $(cat /tmp/managed_resp.txt)"
-            if [ "${HTTP_CODE}" != "202" ]; then
+              --max-time 280)
+            echo "${PUB} (${HTTP_CODE}):"
+            cat /tmp/managed_resp.txt; echo
+            if [ "${HTTP_CODE}" != "${OK}" ]; then
               echo "::error::Portfolio Manager sync for ${PUB} failed with HTTP ${HTTP_CODE}"
               exit 1
             fi
