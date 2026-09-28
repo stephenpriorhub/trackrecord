@@ -138,6 +138,21 @@ export default function AirtableSyncPanel({
             </div>
           )}
 
+          {!applied && s.adopted.length > 0 && (
+            <details className="rounded-lg border border-gray-800 p-3 text-xs text-gray-400">
+              <summary className="cursor-pointer text-gray-300">
+                Re-linked to Airtable&apos;s current record ({s.adopted.length})
+              </summary>
+              <ul className="mt-2 list-disc space-y-0.5 pl-4">
+                {s.adopted.map((c) => (
+                  <li key={c.position}>
+                    {c.position} — {c.matches}
+                  </li>
+                ))}
+              </ul>
+            </details>
+          )}
+
           {!applied && s.alreadyHere.length > 0 && (
             <details className="rounded-lg border border-gray-800 p-3 text-xs text-gray-400">
               <summary className="cursor-pointer text-gray-300">

@@ -242,6 +242,12 @@ export interface SyncReport {
   toCreate: { position: string; portfolio: string; newPortfolio: boolean; publicPortfolio: boolean; trades: string }[];
   /** Airtable positions NOT added because the publication already has them. */
   alreadyHere: { position: string; matches: string }[];
+  /**
+   * Existing Airtable imports re-linked to Airtable's current record for the
+   * same position (Airtable re-created the record, so the old id is gone).
+   * Their trades are then synced like any other.
+   */
+  adopted: { position: string; matches: string }[];
   rebuilt: { position: string; before: string; after: string }[];
   unchanged: number;
   conflicts: { position: string; reason: string }[];
@@ -277,6 +283,7 @@ export async function syncPublicationFromAirtable(
     created: 0,
     toCreate: [],
     alreadyHere: [],
+    adopted: [],
     rebuilt: [],
     unchanged: 0,
     conflicts: [],
@@ -314,10 +321,23 @@ export async function syncPublicationFromAirtable(
   // here": it is reported, never imported a second time.
   const live = await prisma.managedPosition.findMany({
     where: { deletedAt: null, portfolio: { service: { pubCode } } },
-    select: { underlying: true, openedAt: true, airtableId: true, portfolio: { select: { name: true } } },
+    select: {
+      id: true,
+      underlying: true,
+      openedAt: true,
+      airtableId: true,
+      source: true,
+      portfolio: { select: { name: true } },
+      executions: { where: { deletedAt: null }, select: { createdByEmail: true } },
+    },
   });
+  const airtableIds = new Set(positions.map((p) => p.id));
   const known = new Set(live.map((p) => p.airtableId).filter(Boolean));
+  const claimed = new Set<string>();
   const allowed = new Set<string>();
+  /** Airtable position id -> the existing managed position it adopts. */
+  const adoptions = new Map<string, string>();
+
   for (const pos of positions) {
     if (known.has(pos.id)) continue;
     const trades = tradesByPosition.get(pos.id) ?? [];
@@ -326,18 +346,48 @@ export async function syncPublicationFromAirtable(
     for (const t of trades) if (t.fields["SYMBOL"]) bySymbol.set(String(t.fields["SYMBOL"]).trim().toUpperCase(), t);
     const ticker = underlyingFor(pos, bySymbol as Map<string, never>);
     const opened = new Date(pos.fields["Open Date"]);
-    const twin = live.find(
+    const gid = one(pos.fields["Trade Group"]) ?? null;
+    const rawGroup = (gid && groups.get(gid)?.name) || MAIN_PORTFOLIO_NAME;
+    const target = rename[rawGroup] ?? rawGroup;
+
+    // Each existing position can stand in for ONE Airtable position, and one
+    // in the same portfolio is preferred — Prysmian sits in two books.
+    const twins = live.filter(
       (p) =>
+        !claimed.has(p.id) &&
         symbolKey(p.underlying) === symbolKey(ticker) &&
         Math.abs(p.openedAt.getTime() - opened.getTime()) <= DUPLICATE_WINDOW_DAYS * 86_400_000,
     );
-    if (twin) {
-      report.alreadyHere.push({
-        position: String(pos.fields["Position Name"] ?? pos.id),
-        matches: `${twin.underlying} opened ${twin.openedAt.toISOString().slice(0, 10)} in ${twin.portfolio.name}`,
-      });
-    } else {
+    const twin = twins.find((p) => p.portfolio.name === target) ?? twins[0];
+    const label = String(pos.fields["Position Name"] ?? pos.id);
+    if (!twin) {
       allowed.add(pos.id);
+      continue;
+    }
+    claimed.add(twin.id);
+    const matches = `${twin.underlying} opened ${twin.openedAt.toISOString().slice(0, 10)} in ${twin.portfolio.name}`;
+
+    // Adopt only an earlier Airtable import whose record Airtable no longer
+    // has, and that nobody has traded in the hub. Anything else was entered
+    // another way and is left exactly as it is.
+    const orphaned = !twin.airtableId || !airtableIds.has(twin.airtableId);
+    const untouched = twin.executions.every(
+      (e) => e.createdByEmail === null || e.createdByEmail === IMPORT_ACTOR,
+    );
+    if (twin.source === "AIRTABLE_IMPORT" && orphaned && untouched) {
+      adoptions.set(pos.id, twin.id);
+      report.adopted.push({ position: label, matches });
+    } else {
+      report.alreadyHere.push({ position: label, matches });
+    }
+  }
+
+  if (!dryRun) {
+    for (const [airtableId, managedId] of adoptions) {
+      await prisma.managedPosition.update({
+        where: { id: managedId },
+        data: { airtableId },
+      });
     }
   }
 
@@ -356,8 +406,10 @@ export async function syncPublicationFromAirtable(
     const trades = tradesByPosition.get(pos.id) ?? [];
     if (skipReason(pos, trades)) continue;
 
+    // A dry run has not re-linked adopted positions yet, so find them by id.
+    const adoptedId = dryRun ? adoptions.get(pos.id) : undefined;
     const managed = await prisma.managedPosition.findUnique({
-      where: { airtableId: pos.id },
+      where: adoptedId ? { id: adoptedId } : { airtableId: pos.id },
       include: {
         legs: { orderBy: { legIndex: "asc" } },
         executions: {
@@ -521,6 +573,7 @@ export function summariseSync(r: SyncReport) {
     created: r.created,
     toCreate: r.toCreate,
     alreadyHere: r.alreadyHere,
+    adopted: r.adopted,
     rebuilt: r.rebuilt.length,
     unchanged: r.unchanged,
     changes: r.rebuilt,
