@@ -138,6 +138,21 @@ export default function AirtableSyncPanel({
             </div>
           )}
 
+          {!applied && s.alreadyHere.length > 0 && (
+            <details className="rounded-lg border border-gray-800 p-3 text-xs text-gray-400">
+              <summary className="cursor-pointer text-gray-300">
+                Already here, not added again ({s.alreadyHere.length})
+              </summary>
+              <ul className="mt-2 list-disc space-y-0.5 pl-4">
+                {s.alreadyHere.map((c) => (
+                  <li key={c.position}>
+                    {c.position} — matches {c.matches}
+                  </li>
+                ))}
+              </ul>
+            </details>
+          )}
+
           {s.conflicts.length > 0 && (
             <div className="rounded-lg border border-yellow-800/50 bg-yellow-900/20 p-3 text-xs text-yellow-300">
               <p className="mb-1 font-semibold">Left alone — needs a look ({s.conflicts.length})</p>

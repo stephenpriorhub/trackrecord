@@ -280,6 +280,12 @@ export interface CommitOptions {
   onlyPortfolios?: string[];
   /** Rename or merge on the way in: Airtable group name -> target portfolio name. */
   rename?: Record<string, string>;
+  /**
+   * Only these Airtable position ids may be created. The sync passes the set
+   * that survived its duplicate check, so a position already entered here by
+   * hand or from a sheet is never imported a second time.
+   */
+  onlyAirtableIds?: Set<string>;
   /** Cap the number of positions written, for a cautious first pass. */
   limit?: number;
   actorEmail?: string | null;
@@ -325,6 +331,11 @@ export async function commitImport(
 
   for (const pos of positions) {
     if (opts.limit && report.positionsCreated >= opts.limit) break;
+
+    if (opts.onlyAirtableIds && !opts.onlyAirtableIds.has(pos.id)) {
+      report.positionsSkipped += 1;
+      continue;
+    }
 
     // Idempotent on the Airtable record id, so a re-run tops up rather than
     // duplicating — which matters when a first pass was capped by `limit`.
@@ -561,7 +572,7 @@ function resolveOwner(
  * for an options position it is a contract, so the root is taken from the OCC
  * symbol instead.
  */
-function underlyingFor(pos: any, bySymbol: Map<string, any>): string {
+export function underlyingFor(pos: any, bySymbol: Map<string, any>): string {
   const listed = String(pos.fields["Associated Symbols String"] ?? "")
     .split(",")[0]
     .replace(/[^A-Za-z0-9.]/g, "")

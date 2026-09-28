@@ -38,11 +38,15 @@ import {
   fetchPub,
   fetchTradeGroupNames,
   one,
+  underlyingFor,
   isTradableTrade,
   name,
   numOrNull,
   skipReason,
 } from "./import";
+
+/** Same ticker opened this close together = the same position. */
+export const DUPLICATE_WINDOW_DAYS = 3;
 
 /** Airtable weight 1 = this many Portfolio Manager units. */
 export const UNITS_PER_WEIGHT = 100;
@@ -236,6 +240,8 @@ export interface SyncReport {
   created: number;
   /** Dry run: Airtable positions not in Portfolio Manager yet, and where they would go. */
   toCreate: { position: string; portfolio: string; newPortfolio: boolean; publicPortfolio: boolean; trades: string }[];
+  /** Airtable positions NOT added because the publication already has them. */
+  alreadyHere: { position: string; matches: string }[];
   rebuilt: { position: string; before: string; after: string }[];
   unchanged: number;
   conflicts: { position: string; reason: string }[];
@@ -270,6 +276,7 @@ export async function syncPublicationFromAirtable(
     dryRun,
     created: 0,
     toCreate: [],
+    alreadyHere: [],
     rebuilt: [],
     unchanged: 0,
     conflicts: [],
@@ -290,15 +297,6 @@ export async function syncPublicationFromAirtable(
     throw new Error(`${pubCode} is not maintained from Airtable; nothing synced.`);
   }
 
-  if (!dryRun) {
-    const imported = await commitImport(pubCode, {
-      rename: TRADE_GROUP_MERGES[pubCode.toUpperCase()],
-      actorEmail: IMPORT_ACTOR,
-    });
-    report.created = imported.positionsCreated;
-    for (const e of imported.errors) report.errors.push(e);
-  }
-
   const [{ positions, tradesByPosition }, groups] = await Promise.all([
     fetchPub(pubCode),
     fetchTradeGroupNames(),
@@ -308,6 +306,50 @@ export async function syncPublicationFromAirtable(
     where: { service: { pubCode }, archivedAt: null },
     select: { name: true, visibility: true },
   });
+
+  // Duplicate check for positions Airtable has and we do not (by record id).
+  // Some portfolios were entered by hand or loaded from a published index, so
+  // the same position exists here without Airtable's id. Same ticker opened
+  // within DUPLICATE_WINDOW_DAYS anywhere in the publication means "already
+  // here": it is reported, never imported a second time.
+  const live = await prisma.managedPosition.findMany({
+    where: { deletedAt: null, portfolio: { service: { pubCode } } },
+    select: { underlying: true, openedAt: true, airtableId: true, portfolio: { select: { name: true } } },
+  });
+  const known = new Set(live.map((p) => p.airtableId).filter(Boolean));
+  const allowed = new Set<string>();
+  for (const pos of positions) {
+    if (known.has(pos.id)) continue;
+    const trades = tradesByPosition.get(pos.id) ?? [];
+    if (skipReason(pos, trades)) continue;
+    const bySymbol = new Map<string, unknown>();
+    for (const t of trades) if (t.fields["SYMBOL"]) bySymbol.set(String(t.fields["SYMBOL"]).trim().toUpperCase(), t);
+    const ticker = underlyingFor(pos, bySymbol as Map<string, never>);
+    const opened = new Date(pos.fields["Open Date"]);
+    const twin = live.find(
+      (p) =>
+        symbolKey(p.underlying) === symbolKey(ticker) &&
+        Math.abs(p.openedAt.getTime() - opened.getTime()) <= DUPLICATE_WINDOW_DAYS * 86_400_000,
+    );
+    if (twin) {
+      report.alreadyHere.push({
+        position: String(pos.fields["Position Name"] ?? pos.id),
+        matches: `${twin.underlying} opened ${twin.openedAt.toISOString().slice(0, 10)} in ${twin.portfolio.name}`,
+      });
+    } else {
+      allowed.add(pos.id);
+    }
+  }
+
+  if (!dryRun) {
+    const imported = await commitImport(pubCode, {
+      rename: TRADE_GROUP_MERGES[pubCode.toUpperCase()],
+      onlyAirtableIds: allowed,
+      actorEmail: IMPORT_ACTOR,
+    });
+    report.created = imported.positionsCreated;
+    for (const e of imported.errors) report.errors.push(e);
+  }
 
   for (const pos of positions) {
     const label = String(pos.fields["Position Name"] ?? pos.id);
@@ -328,7 +370,7 @@ export async function syncPublicationFromAirtable(
       // Only reachable on a dry run (apply imports first). Say where it would
       // land, because a NEW portfolio starts private and would not appear on
       // any embed until someone publishes it.
-      if (dryRun) {
+      if (dryRun && allowed.has(pos.id)) {
         const gid = one(pos.fields["Trade Group"]) ?? null;
         const raw = (gid && groups.get(gid)?.name) || MAIN_PORTFOLIO_NAME;
         const target = rename[raw] ?? raw;
@@ -478,6 +520,7 @@ export function summariseSync(r: SyncReport) {
     dryRun: r.dryRun,
     created: r.created,
     toCreate: r.toCreate,
+    alreadyHere: r.alreadyHere,
     rebuilt: r.rebuilt.length,
     unchanged: r.unchanged,
     changes: r.rebuilt,
