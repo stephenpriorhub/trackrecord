@@ -45,9 +45,6 @@ import {
   skipReason,
 } from "./import";
 
-/** A per-share entry moving more than this is checked as a possible split. */
-export const ENTRY_CHANGE_LIMIT = 0.2;
-
 /** Same ticker opened this close together = the same position. */
 export const DUPLICATE_WINDOW_DAYS = 3;
 
@@ -183,8 +180,6 @@ export function planPosition(
   stored: StoredFill[],
   desired: DesiredFill[],
   humanEdited: boolean,
-  /** Current market price per leg id, for the split sanity check. */
-  marks: Map<string, number> = new Map(),
 ): PlanOutcome {
   if (humanEdited) {
     return { kind: "conflict", reason: "has trades entered in the hub — left as is" };
@@ -234,45 +229,9 @@ export function planPosition(
     ...f,
     quantity: Math.round(f.quantity * factor),
   }));
-  if (want === fingerprint(scaled)) return { kind: "unchanged" };
-
-  // ENTRY-PRICE GUARD. A rebuild that moves a leg's per-share entry by more
-  // than ENTRY_CHANGE_LIMIT is usually a split adjustment made in Airtable
-  // (weight x2, price /2). That is right when the split happened — Amphenol's
-  // 2-for-1 on 2026-09-03 — and badly wrong when Airtable adjusted a second
-  // time — Super Micro's "10 @ 4.93" on a record already adjusted to 49.27.
-  // Accept it only if it is a clean split (weight x new price = old price) AND
-  // the new entry is plausible against today's market price; otherwise hold
-  // it for a person, because either mistake publishes a false return.
-  for (const leg of legs) {
-    const avg = (fs: { legId: string; intent: string; quantity: number; price: string }[]) => {
-      const o = fs.filter((f) => f.legId === leg.id && f.intent === "OPEN");
-      const q = o.reduce((a, f) => a + f.quantity, 0);
-      return q > 0 ? o.reduce((a, f) => a + Number(f.price) * f.quantity, 0) / q : null;
-    };
-    const before = avg(stored);
-    const after = avg(mapped.map((f) => ({ ...f, price: f.price.toString() })));
-    if (!before || !after) continue;
-    if (Math.abs(after - before) / before <= ENTRY_CHANGE_LIMIT) continue;
-
-    const ratio = before / after;
-    const cleanSplit =
-      Math.round(ratio) >= 2 && Math.abs(ratio - Math.round(ratio)) / ratio < 0.02;
-    const mark = marks.get(leg.id);
-    const plausible = mark !== undefined && mark / after >= 0.25 && mark / after <= 4;
-    if (!cleanSplit || !plausible) {
-      return {
-        kind: "conflict",
-        reason:
-          `Airtable changes the ${leg.marketTicker} entry from ${before.toFixed(2)} to ${after.toFixed(2)}` +
-          (cleanSplit
-            ? ` (a ${Math.round(ratio)}-for-1 adjustment, but today's price ${mark?.toFixed(2) ?? "unknown"} does not fit it — possibly adjusted twice)`
-            : "") +
-          " — check Airtable before syncing",
-      };
-    }
-  }
-  return { kind: "rebuild", fills: mapped };
+  return want === fingerprint(scaled)
+    ? { kind: "unchanged" }
+    : { kind: "rebuild", fills: mapped };
 }
 
 export interface SyncReport {
@@ -452,10 +411,7 @@ export async function syncPublicationFromAirtable(
     const managed = await prisma.managedPosition.findUnique({
       where: adoptedId ? { id: adoptedId } : { airtableId: pos.id },
       include: {
-        legs: {
-          orderBy: { legIndex: "asc" },
-          include: { instrument: { select: { lastPrice: true, manualPrice: true } } },
-        },
+        legs: { orderBy: { legIndex: "asc" } },
         executions: {
           where: { deletedAt: null },
           include: { fills: { where: { deletedAt: null } } },
@@ -507,12 +463,6 @@ export async function syncPublicationFromAirtable(
       stored,
       desiredFills(trades),
       humanEdited,
-      new Map(
-        managed.legs.flatMap((l) => {
-          const m = l.instrument.lastPrice ?? l.instrument.manualPrice;
-          return m === null ? [] : [[l.id, Number(m.toString())] as [string, number]];
-        }),
-      ),
     );
 
     if (plan.kind === "unchanged") {

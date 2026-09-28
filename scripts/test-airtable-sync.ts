@@ -106,35 +106,6 @@ check("...but a legacy import missing a partial exit still is", () => {
   assert.equal(planPosition([leg], stored, dxyz, false).kind, "rebuild");
 });
 
-console.log("\nsplit guard");
-const aph: LegRef = { id: "aph", marketTicker: "APH", side: "BUY", ratio: 1 };
-const smci: LegRef = { id: "smci", marketTicker: "SMCI", side: "BUY", ratio: 1 };
-
-check("Amphenol's real 2-for-1 (1 @ 137.40 -> 2 @ 68.70, trading 84.64) is accepted", () => {
-  const stored = [{ legId: "aph", intent: "OPEN", quantity: 1, price: "137.4", executedAt: new Date("2025-11-25") }];
-  const want = desiredFills([open("a", "APH", 68.7, "2025-11-25", 2)]);
-  assert.equal(planPosition([aph], stored, want, false, new Map([["aph", 84.64]])).kind, "rebuild");
-});
-
-check("Super Micro adjusted twice (49.27 -> 10 @ 4.93, trading ~40) is held for review", () => {
-  const stored = [{ legId: "smci", intent: "OPEN", quantity: 1, price: "49.27", executedAt: new Date("2024-08-07") }];
-  const want = desiredFills([open("a", "SMCI", 4.93, "2024-08-07", 10)]);
-  const p = planPosition([smci], stored, want, false, new Map([["smci", 40]]));
-  assert.equal(p.kind, "conflict");
-});
-
-check("a big entry change that is not a split is held for review", () => {
-  const stored = [{ legId: "aph", intent: "OPEN", quantity: 1, price: "100", executedAt: new Date("2025-11-25") }];
-  const want = desiredFills([open("a", "APH", 70, "2025-11-25", 1)]);
-  assert.equal(planPosition([aph], stored, want, false, new Map([["aph", 84]])).kind, "conflict");
-});
-
-check("no market price means a split cannot be confirmed, so it is held", () => {
-  const stored = [{ legId: "aph", intent: "OPEN", quantity: 1, price: "137.4", executedAt: new Date("2025-11-25") }];
-  const want = desiredFills([open("a", "APH", 68.7, "2025-11-25", 2)]);
-  assert.equal(planPosition([aph], stored, want, false).kind, "conflict");
-});
-
 check("hub edits are never overwritten", () => {
   const p = planPosition([leg], [], dxyz, true);
   assert.equal(p.kind, "conflict");
