@@ -1,9 +1,11 @@
 /**
  * One-time import of existing positions from the Airtable Portfolio Tracker.
  *
- * This SEEDS Portfolio Manager; it is not a sync. After import the rows are
- * guru-authored like any other, nothing is ever written back to Airtable, and
- * re-running only fills gaps (every row is keyed on its Airtable record id).
+ * This SEEDS Portfolio Manager: it creates positions it does not have yet and
+ * skips the rest (every row is keyed on its Airtable record id). Keeping them
+ * in step with trades added in Airtable afterwards — partial exits, scale-ins,
+ * closes — is lib/managed/airtable-sync.ts, which calls this first for new
+ * positions. Nothing is ever written back to Airtable.
  *
  * MAPPING
  *   Airtable Trade Group  ->  ManagedPortfolio
@@ -60,15 +62,15 @@ export interface ImportPlan {
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
-function one(v: any): any {
+export function one(v: any): any {
   return Array.isArray(v) ? v[0] : v;
 }
-function name(v: any): string | null {
+export function name(v: any): string | null {
   const x = one(v);
   if (!x) return null;
   return typeof x === "string" ? x : (x.name ?? null);
 }
-function numOrNull(v: any): D | null {
+export function numOrNull(v: any): D | null {
   const x = one(v);
   if (x === null || x === undefined || x === "") return null;
   try {
@@ -119,7 +121,7 @@ async function fetchTradeGroupNames(): Promise<
 }
 
 /** Every Airtable position belonging to a publication, with its trades attached. */
-async function fetchPub(pubCode: string) {
+export async function fetchPub(pubCode: string) {
   const airtableCode = airtableCodeFor(pubCode);
 
   const portfolios = await airtableFetch(TABLES.portfolios, {
@@ -240,7 +242,7 @@ export async function planImport(pubCode: string): Promise<ImportPlan> {
  * recommendation routinely shows Investment Type ["Stock","Cash","Cash"]. Those
  * are not legs, and importing them invents positions in a security called Cash.
  */
-function isTradableTrade(t: any): boolean {
+export function isTradableTrade(t: any): boolean {
   const type = (name(t.fields["Investment Type"]) ?? "").toLowerCase();
   if (type === "cash" || type === "dividend") return false;
   if (!t.fields["SYMBOL"]) return false;
@@ -258,7 +260,7 @@ function isTradableTrade(t: any): boolean {
  * current price but no open price anywhere — not on the trade, not on the
  * position — and importing those would publish a fabricated return.
  */
-function skipReason(pos: any, trades: any[]): string | null {
+export function skipReason(pos: any, trades: any[]): string | null {
   if (!pos.fields["Open Date"]) return "no open date";
 
   const real = trades.filter((t) => {

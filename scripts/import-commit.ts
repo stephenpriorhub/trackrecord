@@ -6,28 +6,10 @@
  * id, so a run capped by `limit` can simply be repeated to top up.
  */
 import { commitImport } from "../lib/managed/import";
+import { TRADE_GROUP_MERGES } from "../lib/managed/airtable-sync";
 
-/**
- * Editorial merge decisions, recorded here rather than applied by hand so the
- * import stays reproducible.
- *
- * Some services accumulated several "main" trade groups in Airtable over the
- * years. They are one book in practice, and importing them as separate
- * portfolios would publish an arbitrary split. Confirmed with Stephen 2026-08-22.
- *
- * Post-Market Profits is deliberately absent: its IWM / QQQ / SPY / GLD groups
- * look like a deliberate split by underlying, not an accident.
- */
-const MERGES: Record<string, Record<string, string>> = {
-  TPU: {
-    "Main Stock & Option Portfolio": "Main Portfolio",
-    "Monument Trend Advisory Main Portfolio": "Main Portfolio",
-  },
-  WAR: {
-    // A single stray position, orphaned from the main book.
-    "Main Stock & Option Portfolio": "Main Portfolio",
-  },
-};
+// Editorial merge decisions live with the sync so the two can never disagree.
+const MERGES = TRADE_GROUP_MERGES;
 
 async function main() {
   const pub = process.argv[2];

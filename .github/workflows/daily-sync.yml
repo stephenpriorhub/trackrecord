@@ -14,7 +14,12 @@ on:
     # Times are UTC. Runs pre-market, midday, and post-close ET so data stays current
     # even if GitHub delays one run (scheduled crons are best-effort, not exact).
     - cron: '0 12,17,22 * * *'
-  workflow_dispatch: {}   # allows manual "Run workflow" from the Actions tab
+  workflow_dispatch:      # allows manual "Run workflow" from the Actions tab
+    inputs:
+      managed_pubs:
+        description: "Publications to pull into Portfolio Manager (space-separated)"
+        required: false
+        default: ""
 
 concurrency:
   group: airtable-sync
@@ -47,3 +52,28 @@ jobs:
             exit 1
           fi
           echo "Sync accepted."
+
+      - name: Pull Airtable trades into Portfolio Manager
+        # The embeds read Portfolio Manager, not the Airtable mirror above. This
+        # brings Airtable-sourced positions up to date (new positions, partial
+        # exits, closes). See lib/managed/airtable-sync.ts for what it never
+        # touches. Publications: the dispatch input, else repo variable
+        # MANAGED_SYNC_PUBS, else XAI.
+        env:
+          SYNC_API_KEY: ${{ secrets.SYNC_API_KEY }}
+          APP_URL: ${{ vars.APP_URL }}
+          PUBS: ${{ inputs.managed_pubs || vars.MANAGED_SYNC_PUBS || 'XAI' }}
+        run: |
+          set -euo pipefail
+          BASE_URL="${APP_URL:-https://trackrecord.oxfordhub.app}"
+          for PUB in ${PUBS}; do
+            HTTP_CODE=$(curl -sS -o /tmp/managed_resp.txt -w "%{http_code}" \
+              -X POST "${BASE_URL}/api/managed-sync?pubCode=${PUB}&apply=1" \
+              -H "x-sync-key: ${SYNC_API_KEY}" \
+              --max-time 60)
+            echo "${PUB} (${HTTP_CODE}): $(cat /tmp/managed_resp.txt)"
+            if [ "${HTTP_CODE}" != "202" ]; then
+              echo "::error::Portfolio Manager sync for ${PUB} failed with HTTP ${HTTP_CODE}"
+              exit 1
+            fi
+          done

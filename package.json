@@ -9,7 +9,7 @@
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
     "test:authz": "node --import tsx --env-file=.env scripts/test-authz.ts",
-    "test:all": "npm run typecheck && npm run test:embed && npm run test:authz && npm run test:positions && npm run test:manual",
+    "test:all": "npm run typecheck && npm run test:embed && npm run test:airtable-sync && npm run test:authz && npm run test:positions && npm run test:manual",
     "db:migrate": "prisma migrate deploy",
     "test:positions": "node --import tsx --env-file=.env scripts/test-positions.ts",
     "seed:demo": "node --import tsx --env-file=.env scripts/seed-demo-portfolio.ts",
@@ -23,7 +23,8 @@
     "test:manual": "node --import tsx --env-file=.env scripts/test-manual-price.ts",
     "backfill:owners": "node --import tsx --env-file=.env scripts/backfill-owners.ts",
     "repair:tickers": "node --import tsx --env-file=.env scripts/repair-stock-tickers.ts",
-    "test:embed": "node --import tsx scripts/test-embed.ts"
+    "test:embed": "node --import tsx scripts/test-embed.ts",
+    "test:airtable-sync": "node --import tsx scripts/test-airtable-sync.ts"
   },
   "dependencies": {
     "@prisma/client": "5.22.0",
