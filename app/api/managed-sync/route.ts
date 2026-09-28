@@ -1,7 +1,10 @@
 import { NextRequest, NextResponse, after } from "next/server";
-import { prisma } from "@/lib/prisma";
 import { resolvePubCode } from "@/lib/publications";
-import { syncPublicationFromAirtable, type SyncReport } from "@/lib/managed/airtable-sync";
+import {
+  recordSync,
+  summariseSync,
+  syncPublicationFromAirtable,
+} from "@/lib/managed/airtable-sync";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -27,38 +30,21 @@ export async function POST(req: NextRequest) {
   const apply = req.nextUrl.searchParams.get("apply") === "1";
 
   if (!apply) {
-    const report = await syncPublicationFromAirtable(pubCode, { dryRun: true });
-    return NextResponse.json(summarise(report));
+    try {
+      const report = await syncPublicationFromAirtable(pubCode, { dryRun: true });
+      return NextResponse.json(summariseSync(report));
+    } catch (err) {
+      return NextResponse.json(
+        { error: err instanceof Error ? err.message : String(err) },
+        { status: 422 },
+      );
+    }
   }
 
   after(async () => {
     const report = await syncPublicationFromAirtable(pubCode, { dryRun: false });
-    const s = summarise(report);
-    console.log("[managed-sync]", JSON.stringify(s));
-    // "Last pulled" on each Airtable-fed portfolio's source panel.
-    await prisma.managedPortfolio.updateMany({
-      where: {
-        service: { pubCode },
-        positions: { some: { source: "AIRTABLE_IMPORT" } },
-      },
-      data: {
-        syncedAt: new Date(),
-        syncNote: `${s.created} new, ${s.rebuilt} updated, ${s.conflicts.length} need a look`,
-      },
-    });
+    console.log("[managed-sync]", JSON.stringify(summariseSync(report)));
+    await recordSync(report);
   });
   return NextResponse.json({ message: "Sync started", pubCode }, { status: 202 });
-}
-
-function summarise(r: SyncReport) {
-  return {
-    pubCode: r.pubCode,
-    dryRun: r.dryRun,
-    created: r.created,
-    rebuilt: r.rebuilt.length,
-    unchanged: r.unchanged,
-    changes: r.rebuilt,
-    conflicts: r.conflicts,
-    errors: r.errors,
-  };
 }

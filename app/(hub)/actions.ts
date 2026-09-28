@@ -25,6 +25,12 @@ import { createPortfolio, ensureService } from "@/lib/managed/portfolios";
 import { BENCHMARKS } from "@/lib/publications";
 import { createPosition, closePosition, type LegInput } from "@/lib/managed/positions";
 import { parseDecimal, type D } from "@/lib/money";
+import {
+  recordSync,
+  summariseSync,
+  syncPublicationFromAirtable,
+  type SyncSummary,
+} from "@/lib/managed/airtable-sync";
 
 export type ActionResult = { ok: true; message?: string } | { ok: false; error: string };
 
@@ -782,4 +788,52 @@ export async function setManualPriceAction(form: FormData): Promise<ActionResult
 
   revalidatePath(`/portfolio/${position.portfolioId}`);
   return { ok: true, message: clear ? `Cleared the manual price for ${ticker}.` : `Set ${ticker} to ${price}.` };
+}
+
+// ------------------------------------------------------------ airtable sync
+
+export type AirtableSyncResult =
+  | { ok: true; summary: SyncSummary }
+  | { ok: false; error: string };
+
+/**
+ * Preview (dryRun) or apply the Airtable -> Portfolio Manager pull for one
+ * publication. Whole-publication rights only: it can rewrite any of the
+ * service's Airtable-sourced positions, so a guru assigned one portfolio must
+ * not be able to run it. What it never touches is in airtable-sync.ts.
+ */
+export async function airtableSyncAction(
+  serviceId: string,
+  apply: boolean,
+): Promise<AirtableSyncResult> {
+  const { scope } = await actor();
+  if (!serviceId) return { ok: false, error: "No publication given." };
+  if (!(await canManageService(scope, serviceId))) {
+    return { ok: false, error: "You need rights to the whole publication to sync it." };
+  }
+  const service = await prisma.service.findUnique({
+    where: { id: serviceId },
+    select: { pubCode: true, slug: true },
+  });
+  if (!service) return { ok: false, error: "Publication not found." };
+  // Same rule as the page: only publications already fed from Airtable. A
+  // sheet-fed one would import a duplicate partial open book.
+  const fed = await prisma.managedPosition.count({
+    where: { source: "AIRTABLE_IMPORT", deletedAt: null, portfolio: { serviceId } },
+  });
+  if (fed === 0) {
+    return { ok: false, error: "This publication is not maintained from Airtable." };
+  }
+
+  try {
+    const report = await syncPublicationFromAirtable(service.pubCode, { dryRun: !apply });
+    if (apply) {
+      await recordSync(report);
+      revalidatePath(`/publication/${service.slug}`);
+      revalidatePath("/");
+    }
+    return { ok: true, summary: summariseSync(report) };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : String(err) };
+  }
 }

@@ -257,6 +257,20 @@ export async function syncPublicationFromAirtable(
     errors: [],
   };
 
+  // Only publications whose books already came from Airtable. The sheet-fed
+  // ones (DPL, PSU, NBS) keep a partial open book in Airtable, and importing it
+  // would duplicate positions their sheets supplied.
+  const fed = await prisma.managedPosition.count({
+    where: {
+      source: "AIRTABLE_IMPORT",
+      deletedAt: null,
+      portfolio: { service: { pubCode } },
+    },
+  });
+  if (fed === 0) {
+    throw new Error(`${pubCode} is not maintained from Airtable; nothing synced.`);
+  }
+
   if (!dryRun) {
     const imported = await commitImport(pubCode, {
       rename: TRADE_GROUP_MERGES[pubCode.toUpperCase()],
@@ -410,4 +424,34 @@ async function rebuildFills(
   });
 
   await recomputePosition(positionId);
+}
+
+/** The report, flattened for a page or an API response. */
+export function summariseSync(r: SyncReport) {
+  return {
+    pubCode: r.pubCode,
+    dryRun: r.dryRun,
+    created: r.created,
+    rebuilt: r.rebuilt.length,
+    unchanged: r.unchanged,
+    changes: r.rebuilt,
+    conflicts: r.conflicts,
+    errors: r.errors,
+  };
+}
+export type SyncSummary = ReturnType<typeof summariseSync>;
+
+/** Stamp "Last pulled" on the publication's Airtable-fed portfolios. */
+export async function recordSync(r: SyncReport) {
+  const s = summariseSync(r);
+  await prisma.managedPortfolio.updateMany({
+    where: {
+      service: { pubCode: r.pubCode },
+      positions: { some: { source: "AIRTABLE_IMPORT" } },
+    },
+    data: {
+      syncedAt: new Date(),
+      syncNote: `${s.created} new, ${s.rebuilt} updated, ${s.conflicts.length} need a look`,
+    },
+  });
 }

@@ -16,6 +16,7 @@ import NoManageAccess from "../../NoManageAccess";
 import { StatBar } from "../../StatBar";
 import { KeyMetricsPanel } from "../../KeyMetrics";
 import ActionForm from "../../ActionForm";
+import AirtableSyncPanel from "../../AirtableSyncPanel";
 import { createPortfolioAction, archivePortfolioAction, reorderPortfolioAction } from "../../actions";
 
 export const dynamic = "force-dynamic";
@@ -79,6 +80,13 @@ export default async function PublicationPage({
   );
 
   const canAddPortfolio = await canManageService(scope, service.id);
+  // Only publications whose books came from Airtable get the sync. The
+  // sheet-fed ones (DPL, PSU, NBS) hold only a partial open book in Airtable,
+  // and pulling it would duplicate what the sheets already supplied.
+  const airtableFed =
+    (await prisma.managedPosition.count({
+      where: { source: "AIRTABLE_IMPORT", deletedAt: null, portfolio: { serviceId: service.id } },
+    })) > 0;
 
   return (
     <div className="space-y-10">
@@ -168,6 +176,21 @@ export default async function PublicationPage({
           </div>
         ))}
       </section>
+
+      {canAddPortfolio && airtableFed && (
+        <AirtableSyncPanel
+          serviceId={service.id}
+          lastPulled={(() => {
+            const at = service.portfolios
+              .map((p) => p.syncedAt)
+              .filter((d): d is Date => d !== null)
+              .sort((a, b) => b.getTime() - a.getTime())[0];
+            return at
+              ? `${at.toLocaleString("en-US", { timeZone: "America/New_York" })} ET`
+              : null;
+          })()}
+        />
+      )}
 
       <section className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-gray-800 bg-gray-900 p-5">
         <div>
