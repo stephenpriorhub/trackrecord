@@ -1,5 +1,5 @@
 import { marketDataDelayMinutes } from "@/lib/massive";
-import type { EmbedRow, EmbedOptions, EmbedView } from "@/lib/managed/embed";
+import type { EmbedBlock, EmbedRow, EmbedOptions, EmbedView } from "@/lib/managed/embed";
 import type { D } from "@/lib/money";
 
 /**
@@ -10,22 +10,42 @@ import type { D } from "@/lib/money";
  * eventually disagree about the same position. Everything that differs between
  * them is already decided in lib/managed/embed.ts and arrives here as data.
  *
- * Light theme on purpose: this is dropped into marketing and subscriber pages,
- * which are light, and an embed that fights its host looks broken.
+ * Light by default, because this is dropped into marketing and subscriber
+ * pages, which are light. Everything visual runs through CSS variables so the
+ * look options (theme, background, cards, accent, font, density, corners) are
+ * attribute and variable swaps, never a second stylesheet.
  *
  * Responsive without JavaScript: the tables become stacked cards under 720px
  * rather than scrolling sideways, because a reader on a phone should not have to
- * discover a horizontal scrollbar to see the return.
+ * discover a horizontal scrollbar to see the return. (The optional reader
+ * tabs are the one script, and without it every group simply stays visible.)
  */
 export default function EmbedBody({ view }: { view: EmbedView }) {
   const options = view.options;
-  const showOpen = options.show === "open" || options.show === "both";
-  const showClosed = options.show === "closed" || options.show === "both";
+  const look = options.look;
+  const grouped = view.groups.length > 0;
+
+  // Only validated values reach here (see parseEmbedOptions): a #hex, "none",
+  // or null for the theme default.
+  const vars: Record<string, string> = {};
+  if (look.background) {
+    vars["--pf-bg"] = look.background === "none" ? "transparent" : look.background;
+  }
+  if (look.accent) vars["--pf-accent"] = look.accent;
 
   return (
     <>
       <style>{CSS}</style>
-      <div className="pf">
+      <div
+        className="pf"
+        data-theme={look.theme}
+        data-cards={look.cards ? "on" : "off"}
+        data-density={look.density}
+        data-corners={look.corners}
+        data-font={look.font}
+        data-bg={look.background === "none" ? "none" : undefined}
+        style={vars as React.CSSProperties}
+      >
         {view.preview && (
           // Loud and unmissable: this render includes a book that is NOT public,
           // so nobody should paste this URL into a page believing it will work.
@@ -35,63 +55,142 @@ export default function EmbedBody({ view }: { view: EmbedView }) {
           </p>
         )}
         <header className="pf-head">
-          <h1>{view.title}</h1>
-          {view.kind === "service" && view.included.length > 1 && (
+          {look.title && <h1>{view.title}</h1>}
+          {view.kind === "service" && !grouped && view.included.length > 1 && (
             <p className="pf-books">
               {view.included.map((b) => b.name).join(" · ")}
             </p>
           )}
           {options.summary !== "none" && (
-            <p className="pf-summary">
-              <span>
-                <strong>{view.title.replace(/ Portfolio$/, "")}:</strong>{" "}
-                <Pct v={view.portfolioReturn} />
-              </span>
-              {/* Only when the page asked for a comparison AND there is one to
-                  make. A portfolio with the benchmark switched off, or one the
-                  index cannot cover, falls back to its own figure alone rather
-                  than printing a blank next to a label. */}
-              {options.summary === "benchmark" &&
-                view.showBenchmark &&
-                view.benchmarkReturn !== null && (
-                  <span>
-                    <strong>{view.benchmarkTicker}:</strong>{" "}
-                    <Pct v={view.benchmarkReturn} />
-                    {/* The window, because "+12%" is meaningless without it —
-                        and because it is what shows the two figures cover the
-                        same period. */}
-                    {view.benchmarkFrom && (
-                      <span className="dim"> since {day(view.benchmarkFrom)}</span>
-                    )}
-                  </span>
-                )}
-            </p>
+            <div data-pf-overall>
+              <Summary block={view} options={options} />
+            </div>
           )}
           <p className="pf-asof">{asOfLine(view.priceAsOf, view.priceSources)}</p>
         </header>
 
-        {showOpen && (
-          <Section title="Open Positions" rows={view.open} kind="open" options={options} />
+        {options.tabs && (
+          // Hidden until the script runs: without JavaScript the tabs could not
+          // switch anything, and every group simply stays visible below.
+          <div className="pf-tabbar" hidden>
+            <p className="pf-tablabel" id="pf-tablabel">Select a portfolio:</p>
+            <nav className="pf-tabs" role="tablist" aria-labelledby="pf-tablabel">
+              {options.allTab && (
+                <button type="button" role="tab" aria-selected="false" data-pf-tab="">
+                  All portfolios
+                </button>
+              )}
+              {view.groups.map((g) => (
+                <button key={g.slug} type="button" role="tab" aria-selected="false" data-pf-tab={g.slug ?? ""}>
+                  {g.title}
+                </button>
+              ))}
+            </nav>
+          </div>
         )}
-        {showClosed && (
-          <Section
-            title="Closed Positions"
-            rows={view.closed}
-            kind="closed"
-            options={options}
-            // Say plainly that the table is a slice. The percentages above are
-            // computed over the whole record, so a reader who is not told would
-            // reasonably assume these rows are what produced them.
-            note={
-              view.closedTotal > view.closed.length
-                ? `Showing the ${view.closed.length} most recent of ${view.closedTotal.toLocaleString()} closed positions. Returns above cover all ${view.closedTotal.toLocaleString()}.`
-                : null
-            }
-          />
+
+        {grouped ? (
+          view.groups.map((g) => (
+            <section key={g.slug} className="pf-group" data-group={g.slug}>
+              <div className="pf-group-head">
+                <h2>{g.title}</h2>
+                {g.description && <p className="pf-desc">{g.description}</p>}
+                {options.summary !== "none" && (
+                  <Summary block={g} options={options} />
+                )}
+              </div>
+              <Tables block={g} options={options} level={3} />
+            </section>
+          ))
+        ) : (
+          <Tables block={view} options={options} level={2} />
         )}
       </div>
       {/* Report our height so a host page can size the iframe without a scrollbar. */}
       <script dangerouslySetInnerHTML={{ __html: RESIZE }} />
+      {options.tabs && <script dangerouslySetInnerHTML={{ __html: TABS }} />}
+    </>
+  );
+}
+
+/**
+ * "{Portfolio}: +x%   S&P 500: +y% since 11/25/25".
+ *
+ * The portfolio figure is the TOTAL return per position — realized exits and
+ * the marked remainder blended — so a partly sold winner counts once and counts
+ * in full. The index is measured over the same window, from the book's start.
+ */
+function Summary({ block, options }: { block: EmbedBlock; options: EmbedOptions }) {
+  const compare =
+    options.summary === "benchmark" &&
+    block.showBenchmark &&
+    block.benchmarkReturn !== null;
+  return (
+    <>
+      <p className="pf-summary">
+        <span>
+          <strong>{block.title.replace(/ Portfolio$/, "")}:</strong>{" "}
+          <Pct v={block.portfolioReturn} />
+        </span>
+        {/* Only when the page asked for a comparison AND there is one to make.
+            A book with the benchmark switched off, or one the index cannot
+            cover, falls back to its own figure alone rather than printing a
+            blank next to a label. */}
+        {compare && (
+          <span>
+            <strong>{block.benchmarkName}:</strong> <Pct v={block.benchmarkReturn} />
+          </span>
+        )}
+        {block.benchmarkFrom && (compare || options.summary === "portfolio") && (
+          // The window, because "+12%" is meaningless without it — and because
+          // it shows the two figures cover the same period.
+          <span className="dim">since {day(block.benchmarkFrom)}</span>
+        )}
+      </p>
+      {block.partials > 0 && (
+        <p className="pf-basis">
+          Total return per position, equal-weighted across {block.measured}{" "}
+          position{block.measured === 1 ? "" : "s"} — includes realized gains
+          on {block.partials} partially closed.
+        </p>
+      )}
+    </>
+  );
+}
+
+function Tables({
+  block,
+  options,
+  level,
+}: {
+  block: EmbedBlock;
+  options: EmbedOptions;
+  level: 2 | 3;
+}) {
+  const showOpen = options.show === "open" || options.show === "both";
+  const showClosed = options.show === "closed" || options.show === "both";
+  return (
+    <>
+      {showOpen && (
+        <Section title="Open Positions" rows={block.open} kind="open" options={options} level={level} />
+      )}
+      {showClosed && (
+        <Section
+          title="Closed Positions"
+          rows={block.closed}
+          kind="closed"
+          options={options}
+          level={level}
+          // Say plainly that the table is a slice. The percentages above are
+          // computed over the whole record, so a reader who is not told would
+          // reasonably assume these rows are what produced them.
+          note={
+            block.closedTotal > block.closed.length
+              ? `Showing the ${block.closed.length} most recent of ${block.closedTotal.toLocaleString()} closed positions. Returns above cover all of them.`
+              : null
+          }
+        />
+      )}
     </>
   );
 }
@@ -161,14 +260,17 @@ function Section({
   rows,
   kind,
   options,
+  level,
   note = null,
 }: {
   title: string;
   rows: EmbedRow[];
   kind: "open" | "closed";
   options: EmbedOptions;
+  level: 2 | 3;
   note?: string | null;
 }) {
+  const Heading = level === 2 ? "h2" : "h3";
   // Only a merged service embed carries this column; on a single book every row
   // would answer the same, which is just noise.
   const book = options.portfolioColumn;
@@ -201,7 +303,7 @@ function Section({
 
   return (
     <section className="pf-card">
-      <h2>{title}</h2>
+      <Heading className="pf-title">{title}</Heading>
       {note && <p className="pf-note">{note}</p>}
 
       {rows.length === 0 ? (
@@ -285,34 +387,78 @@ function Section({
  * host loads or leak styles the host did not ask for.
  */
 const CSS = `
-.pf { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-      color: #1f2937; background: #e9ecef; padding: 16px; box-sizing: border-box; }
+.pf {
+  --pf-bg: #e9ecef; --pf-card: #fff; --pf-text: #374151; --pf-strong: #111827;
+  --pf-muted: #6b7280; --pf-dim: #9ca3af; --pf-line: #e5e7eb; --pf-line2: #f3f4f6;
+  --pf-gain: #059669; --pf-loss: #dc2626; --pf-radius: 12px;
+  --pf-cell: 12px 10px; --pf-size: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  color: var(--pf-text); background: var(--pf-bg); padding: 16px; box-sizing: border-box;
+}
+/* Dark is only ever chosen explicitly (?theme=dark). No color-scheme is
+   declared, on purpose: an iframe whose color-scheme differs from its host's
+   gets an opaque canvas painted behind it, which would break a transparent
+   background. */
+.pf[data-theme="dark"] {
+  --pf-bg: #0b0f14; --pf-card: #121821; --pf-text: #d1d5db; --pf-strong: #f9fafb;
+  --pf-muted: #9ca3af; --pf-dim: #6b7280; --pf-line: #243041; --pf-line2: #1a2230;
+  --pf-gain: #34d399; --pf-loss: #f87171;
+}
+.pf[data-font="serif"] { font-family: Georgia, "Times New Roman", serif; }
+.pf[data-corners="square"] { --pf-radius: 0px; }
+.pf[data-density="compact"] { --pf-cell: 6px 8px; --pf-size: 13px; }
+.pf[data-bg="none"] { padding-left: 0; padding-right: 0; }
 .pf * { box-sizing: border-box; }
 .pf-head { padding: 4px 8px 16px; }
-.pf-head h1 { margin: 0; font-size: 26px; font-weight: 700; color: #111827; }
-.pf-summary { margin: 8px 0 0; font-size: 15px; display: flex; flex-wrap: wrap; gap: 22px; }
-.pf-summary strong { font-weight: 700; color: #111827; }
-.pf-asof { margin: 8px 0 0; font-size: 12px; color: #6b7280; }
+.pf-head h1 { margin: 0 0 8px; font-size: 26px; font-weight: 700; color: var(--pf-accent, var(--pf-strong)); }
+.pf-summary { margin: 0; font-size: 15px; display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 22px; }
+.pf-summary strong { font-weight: 700; color: var(--pf-strong); }
+.pf-summary .dim { font-size: 13px; }
+.pf-basis { margin: 4px 0 0; font-size: 12px; color: var(--pf-muted); }
+.pf-asof { margin: 8px 0 0; font-size: 12px; color: var(--pf-muted); }
 .pf-preview { margin: 0 0 14px; padding: 10px 14px; border-radius: 10px; font-size: 13px;
               font-weight: 600; color: #92400e; background: #fef3c7; border: 1px solid #fcd34d; }
-.pf-books { margin: 6px 0 0; font-size: 13px; color: #6b7280; }
-.pf .book { color: #6b7280; font-size: 13px; white-space: nowrap; }
-.pf-card { background: #fff; border-radius: 12px; padding: 20px; margin-bottom: 20px;
+.pf-books { margin: 0 0 8px; font-size: 13px; color: var(--pf-muted); }
+.pf-tabbar { margin: 0 0 18px; }
+.pf-tabbar[hidden] { display: none; }
+.pf-tablabel { margin: 0 0 4px; padding: 0 8px; font-size: 13px; font-weight: 600; color: var(--pf-muted); }
+.pf-tabs { display: flex; gap: 4px; padding: 0 8px; overflow-x: auto;
+           border-bottom: 1px solid var(--pf-line); scrollbar-width: none; }
+.pf-tabs::-webkit-scrollbar { display: none; }
+.pf-tabs button { font: inherit; font-size: 14px; font-weight: 600; color: var(--pf-muted);
+                  background: none; border: 0; border-bottom: 2px solid transparent;
+                  padding: 10px 14px; margin-bottom: -1px; white-space: nowrap; cursor: pointer; }
+.pf-tabs button:hover { color: var(--pf-strong); }
+.pf-tabs button[aria-selected="true"] { color: var(--pf-accent, var(--pf-strong));
+                                        border-bottom-color: var(--pf-accent, var(--pf-strong)); }
+.pf-tabs button:focus-visible { outline: 2px solid var(--pf-accent, #2563eb); outline-offset: -2px; }
+/* On a single-book tab its own heading repeats the tab label, so drop it. */
+.pf[data-tab-active] .pf-group-head h2 { display: none; }
+.pf[data-tab-active] .pf-group-head { border-top: 0; padding-top: 0; }
+.pf-group { margin: 8px 0 28px; }
+.pf-group[hidden] { display: none; }
+.pf-group-head { padding: 12px 8px 14px; border-top: 2px solid var(--pf-accent, var(--pf-line)); }
+.pf-group-head h2 { margin: 0 0 6px; font-size: 21px; font-weight: 700; color: var(--pf-accent, var(--pf-strong)); }
+.pf-desc { margin: 0 0 8px; font-size: 13px; color: var(--pf-muted); }
+.pf .book { color: var(--pf-muted); font-size: 13px; white-space: nowrap; }
+.pf-card { background: var(--pf-card); border-radius: var(--pf-radius); padding: 20px; margin-bottom: 20px;
            box-shadow: 0 1px 2px rgba(0,0,0,.06); }
-.pf-card h2 { margin: 0 0 16px; font-size: 19px; font-weight: 700; color: #111827; }
-.pf-empty { margin: 0; font-size: 14px; color: #6b7280; }
-.pf-note { margin: -8px 0 14px; font-size: 12px; color: #6b7280; }
-.pf table { width: 100%; border-collapse: collapse; font-size: 14px; }
-.pf th { text-align: center; font-weight: 700; color: #374151; padding: 8px 10px;
-         border-bottom: 1px solid #e5e7eb; white-space: nowrap; }
+.pf[data-cards="off"] .pf-card { background: transparent; box-shadow: none; padding: 4px 8px 0; margin-bottom: 24px; }
+.pf-title { margin: 0 0 16px; font-size: 19px; font-weight: 700; color: var(--pf-strong); }
+h3.pf-title { font-size: 16px; margin-bottom: 12px; }
+.pf-empty { margin: 0; font-size: 14px; color: var(--pf-muted); }
+.pf-note { margin: -8px 0 14px; font-size: 12px; color: var(--pf-muted); }
+.pf table { width: 100%; border-collapse: collapse; font-size: var(--pf-size); }
+.pf th { text-align: center; font-weight: 700; color: var(--pf-text); padding: 8px 10px;
+         border-bottom: 1px solid var(--pf-line); white-space: nowrap; }
 .pf th:first-child, .pf td:first-child { text-align: left; }
-.pf td { text-align: center; padding: 12px 10px; border-bottom: 1px solid #f3f4f6; color: #374151; }
+.pf td { text-align: center; padding: var(--pf-cell); border-bottom: 1px solid var(--pf-line2); color: var(--pf-text); }
 .pf tbody tr:last-child td { border-bottom: none; }
-.pf .sym { font-weight: 700; color: #111827; }
-.pf .cmt { text-align: left; color: #6b7280; font-size: 13px; }
-.pf .gain { color: #059669; font-weight: 600; }
-.pf .loss { color: #dc2626; font-weight: 600; }
-.pf .dim { color: #9ca3af; }
+.pf .sym { font-weight: 700; color: var(--pf-accent, var(--pf-strong)); }
+.pf .cmt { text-align: left; color: var(--pf-muted); font-size: 13px; }
+.pf .gain { color: var(--pf-gain); font-weight: 600; }
+.pf .loss { color: var(--pf-loss); font-weight: 600; }
+.pf .dim { color: var(--pf-dim); }
 
 /* Under 720px each row becomes its own card with the column name beside each
    value, so nothing needs horizontal scrolling on a phone. */
@@ -321,23 +467,69 @@ const CSS = `
   .pf-card { padding: 14px; }
   .pf thead { display: none; }
   .pf table, .pf tbody, .pf tr, .pf td { display: block; width: 100%; }
-  .pf tr { border: 1px solid #e5e7eb; border-radius: 10px; padding: 6px 10px; margin-bottom: 10px; }
+  .pf tr { border: 1px solid var(--pf-line); border-radius: min(var(--pf-radius), 10px); padding: 6px 10px; margin-bottom: 10px; }
   .pf td { display: flex; justify-content: space-between; gap: 12px; text-align: right;
-           border-bottom: 1px solid #f3f4f6; padding: 7px 0; }
+           border-bottom: 1px solid var(--pf-line2); padding: 7px 0; }
   .pf tr td:last-child { border-bottom: none; }
   .pf td:first-child { text-align: right; }
-  .pf td::before { content: attr(data-label); font-weight: 600; color: #6b7280;
+  .pf td::before { content: attr(data-label); font-weight: 600; color: var(--pf-muted);
                    text-align: left; flex: 0 0 auto; }
   .pf .book { text-align: right; white-space: normal; }
   .pf .cmt { text-align: right; }
   .pf td.blank { display: none; }
+  .pf-tabs button { padding: 10px 12px; font-size: 13px; }
 }
+`;
 
-@media (prefers-color-scheme: dark) {
-  /* Only when the host has not forced a light context. Kept conservative: an
-     embed that guesses wrong is worse than one that stays light. */
-  .pf[data-theme="dark"] { background: #0b0f14; color: #e5e7eb; }
-}
+/**
+ * The reader-facing portfolio tabs. Every group is already in the page, so
+ * switching is instant and needs no request. "All portfolios" (when enabled)
+ * shows the publication headline and every group; a single tab shows only that
+ * book, whose own headline is then the figure being read. Whichever tab comes
+ * first opens selected. Arrow keys move between tabs.
+ *
+ * Never scrollIntoView here: inside an iframe it scrolls the HOST page too, so
+ * a reader would be yanked to the embed on load. Only the tab strip scrolls.
+ */
+const TABS = `
+(function () {
+  var bar = document.querySelector(".pf-tabbar");
+  var nav = document.querySelector(".pf-tabs");
+  var pf = document.querySelector(".pf");
+  if (!bar || !nav || !pf) return;
+  bar.hidden = false;
+  var tabs = Array.prototype.slice.call(nav.querySelectorAll("[data-pf-tab]"));
+  function select(tab) {
+    var v = tab.getAttribute("data-pf-tab");
+    tabs.forEach(function (t) {
+      var on = t === tab;
+      t.setAttribute("aria-selected", on ? "true" : "false");
+      t.tabIndex = on ? 0 : -1;
+    });
+    document.querySelectorAll("[data-group]").forEach(function (g) {
+      g.hidden = !!v && g.getAttribute("data-group") !== v;
+    });
+    var o = document.querySelector("[data-pf-overall]");
+    if (o) o.hidden = !!v;
+    if (v) pf.setAttribute("data-tab-active", v); else pf.removeAttribute("data-tab-active");
+    var l = tab.offsetLeft - nav.offsetLeft, r = l + tab.offsetWidth;
+    if (l < nav.scrollLeft) nav.scrollLeft = l;
+    else if (r > nav.scrollLeft + nav.clientWidth) nav.scrollLeft = r - nav.clientWidth;
+  }
+  tabs.forEach(function (t, i) {
+    t.tabIndex = i === 0 ? 0 : -1;
+    t.addEventListener("click", function () { select(t); });
+    t.addEventListener("keydown", function (e) {
+      var d = e.key === "ArrowRight" ? 1 : e.key === "ArrowLeft" ? -1 : 0;
+      if (!d) return;
+      e.preventDefault();
+      var next = tabs[(i + d + tabs.length) % tabs.length];
+      next.focus();
+      select(next);
+    });
+  });
+  if (tabs.length) select(tabs[0]);
+})();
 `;
 
 /**
@@ -348,15 +540,19 @@ const RESIZE = `
 (function () {
   if (window.parent === window) return;
   var last = 0;
+  // Measure the embed itself, not the document: a document's scrollHeight never
+  // drops below the iframe's current height, so once grown the frame could
+  // never shrink back (e.g. when a reader picks one portfolio from the dropdown).
+  var pf = document.querySelector(".pf");
   function send() {
-    var h = document.documentElement.scrollHeight;
+    var h = pf ? Math.ceil(pf.getBoundingClientRect().height) : document.documentElement.scrollHeight;
     if (h === last) return;
     last = h;
     window.parent.postMessage({ type: "oxfordhub:portfolio-embed:height", height: h, path: location.pathname }, "*");
   }
   send();
   window.addEventListener("load", send);
-  if (window.ResizeObserver) new ResizeObserver(send).observe(document.documentElement);
+  if (window.ResizeObserver) new ResizeObserver(send).observe(pf || document.documentElement);
   else setInterval(send, 1000);
 })();
 `;

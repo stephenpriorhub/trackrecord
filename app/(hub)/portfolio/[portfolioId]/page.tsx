@@ -9,7 +9,6 @@ import { portfolioSource, positionSourceUrl } from "@/lib/managed/source";
 import { BENCHMARKS, benchmarkLabel } from "@/lib/publications";
 import NoManageAccess from "../../NoManageAccess";
 import { StatBar } from "../../StatBar";
-import EmbedBuilder from "../../EmbedBuilder";
 import ActionForm from "../../ActionForm";
 import AddPositionForm from "./AddPositionForm";
 import {
@@ -113,7 +112,6 @@ export default async function PortfolioPage({
         portfolio.startDate ?? stats.since,
       )
     : null;
-  const origin = process.env.NEXT_PUBLIC_APP_ORIGIN ?? "https://trackrecord.oxfordhub.app";
 
   return (
     <div className="space-y-8">
@@ -265,17 +263,19 @@ export default async function PortfolioPage({
 
       <SourcePanel portfolio={portfolio} />
 
-      <section className="rounded-xl border border-gray-800 bg-gray-900 p-5">
-        <h3 className="mb-1 font-semibold">Embed this portfolio</h3>
-        <p className="mb-4 max-w-prose text-xs text-gray-500">
-          Pick what to show, then copy the code into any page.
-        </p>
-        <EmbedBuilder
-          mode="portfolio"
-          slug={portfolio.slug}
-          origin={origin}
-          isPublic={portfolio.visibility === "PUBLIC"}
-        />
+      <section className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-gray-800 bg-gray-900 p-5">
+        <div>
+          <h3 className="font-semibold">Embed this portfolio</h3>
+          <p className="mt-1 text-xs text-gray-500">
+            Choose what to show and how it looks, preview it, then copy the code.
+          </p>
+        </div>
+        <Link
+          href={`/embeds?service=${encodeURIComponent(portfolio.service.slug)}&portfolio=${encodeURIComponent(portfolio.slug)}`}
+          className="rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-500"
+        >
+          Build an embed →
+        </Link>
       </section>
     </div>
   );

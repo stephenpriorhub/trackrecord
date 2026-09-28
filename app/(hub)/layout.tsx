@@ -53,6 +53,11 @@ export default async function HubLayout({ children }: { children: React.ReactNod
                 Portfolios
               </Link>
             )}
+            {canManage && (
+              <Link href="/embeds" className="text-gray-300 hover:text-white">
+                Embeds
+              </Link>
+            )}
             <Link href="/dashboard" className="text-gray-300 hover:text-white">
               Track Record
             </Link>

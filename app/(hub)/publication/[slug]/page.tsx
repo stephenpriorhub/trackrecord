@@ -16,7 +16,6 @@ import NoManageAccess from "../../NoManageAccess";
 import { StatBar } from "../../StatBar";
 import { KeyMetricsPanel } from "../../KeyMetrics";
 import ActionForm from "../../ActionForm";
-import EmbedBuilder from "../../EmbedBuilder";
 import { createPortfolioAction, archivePortfolioAction, reorderPortfolioAction } from "../../actions";
 
 export const dynamic = "force-dynamic";
@@ -80,8 +79,6 @@ export default async function PublicationPage({
   );
 
   const canAddPortfolio = await canManageService(scope, service.id);
-  const origin =
-    process.env.NEXT_PUBLIC_APP_ORIGIN ?? "https://trackrecord.oxfordhub.app";
 
   return (
     <div className="space-y-10">
@@ -172,26 +169,19 @@ export default async function PublicationPage({
         ))}
       </section>
 
-      <section className="rounded-xl border border-gray-800 bg-gray-900 p-5">
-        <h3 className="mb-1 font-semibold">Embed this whole publication</h3>
-        <p className="mb-4 max-w-prose text-xs text-gray-500">
-          One iframe covering every published portfolio below, merged into a
-          single open and closed table. Untick a portfolio to leave it out of
-          this particular page. To embed just one book on its own, use the
-          builder on that portfolio.
-        </p>
-        <EmbedBuilder
-          mode="service"
-          slug={service.slug}
-          origin={origin}
-          isPublic={service.portfolios.some((p) => p.visibility === "PUBLIC")}
-          books={service.portfolios.map((p) => ({
-            slug: p.slug,
-            name: p.name,
-            isPublic: p.visibility === "PUBLIC",
-            positions: perPortfolio.get(p.id)?.positions ?? 0,
-          }))}
-        />
+      <section className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-gray-800 bg-gray-900 p-5">
+        <div>
+          <h3 className="font-semibold">Embed this publication</h3>
+          <p className="mt-1 text-xs text-gray-500">
+            The whole publication grouped by portfolio, or any single portfolio, in any look.
+          </p>
+        </div>
+        <Link
+          href={`/embeds?service=${encodeURIComponent(service.slug)}`}
+          className="rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-500"
+        >
+          Build an embed →
+        </Link>
       </section>
 
       {canAddPortfolio && (

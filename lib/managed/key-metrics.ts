@@ -19,6 +19,11 @@
 import { prisma } from "../prisma";
 import { dec, ZERO, type D } from "../money";
 import { loadBenchmarkSeries } from "./benchmark";
+import {
+  totalReturn,
+  TOTAL_RETURN_SELECT,
+  type TotalReturnPosition,
+} from "./total-return";
 
 /** A return of +10% or better — "double digit" in the source reporting. */
 const DOUBLE_DIGIT = 0.1;
@@ -63,12 +68,11 @@ export interface KeyMetrics {
   benchmarks: BenchmarkRow[];
 }
 
-interface Row {
+type Row = TotalReturnPosition & {
   status: string;
   openedAt: Date;
   closedAt: Date | null;
-  cachedReturnPct: unknown;
-}
+};
 
 function pctOf(n: number, total: number): D | null {
   return total > 0 ? dec(n).div(total) : null;
@@ -106,7 +110,7 @@ export async function keyMetrics(
           status: true,
           openedAt: true,
           closedAt: true,
-          cachedReturnPct: true,
+          ...TOTAL_RETURN_SELECT,
         },
       }),
       // A "trade opened" is one OPEN order. A position scaled into three times
@@ -129,11 +133,9 @@ export async function keyMetrics(
 
   const now = new Date();
   const returns: D[] = [];
-  for (const p of positions) {
-    if (p.cachedReturnPct !== null && p.cachedReturnPct !== undefined) {
-      returns.push(dec(p.cachedReturnPct.toString()));
-    }
-  }
+  // TOTAL return per position — realized exits included (see total-return.ts).
+  const totals = new Map(positions.map((p) => [p, totalReturn(p)]));
+  for (const r of totals.values()) if (r !== null) returns.push(r);
 
   const winners = returns.filter((r) => r.gt(0)).length;
   const triple = returns.filter((r) => r.gte(TRIPLE_DIGIT)).length;
@@ -211,11 +213,12 @@ async function benchmarkRow(
   const mine: D[] = [];
   const theirs: D[] = [];
   for (const p of positions) {
-    if (p.cachedReturnPct === null || p.cachedReturnPct === undefined) continue;
+    const total = totalReturn(p);
+    if (total === null) continue;
     const start = series.on(p.openedAt);
     const end = series.on(p.closedAt ?? now);
     if (!start || !end || start.isZero()) continue;
-    mine.push(dec(p.cachedReturnPct.toString()));
+    mine.push(total);
     theirs.push(end.minus(start).div(start));
   }
   if (mine.length === 0) return empty;

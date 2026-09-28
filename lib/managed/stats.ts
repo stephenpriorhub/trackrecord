@@ -14,6 +14,11 @@
 import { prisma } from "../prisma";
 import { dec, ZERO, type D } from "../money";
 import { benchmarkSince, type BenchmarkComparison } from "./benchmark";
+import {
+  totalReturn,
+  TOTAL_RETURN_SELECT,
+  type TotalReturnPosition,
+} from "./total-return";
 
 export interface Stats {
   positions: number;
@@ -50,11 +55,10 @@ const EMPTY: Stats = {
   since: null,
 };
 
-type Row = {
+type Row = TotalReturnPosition & {
   status: string;
   openedAt: Date;
   closedAt: Date | null;
-  cachedReturnPct: unknown;
   cachedUnpriced: boolean;
 };
 
@@ -72,8 +76,11 @@ function summarise(rows: Row[]): Stats {
     if (!since || r.openedAt < since) since = r.openedAt;
     if (r.cachedUnpriced) unpriced += 1;
 
-    if (r.cachedReturnPct !== null && r.cachedReturnPct !== undefined) {
-      const v = dec(r.cachedReturnPct.toString());
+    // TOTAL return: a partly sold position counts its realized exits too, not
+    // just the remainder's move (see total-return.ts). Identical to
+    // cachedReturnPct for anything fully open or fully closed.
+    const v = totalReturn(r);
+    if (v !== null) {
       returns.push(v);
       if (r.status === "CLOSED") {
         closedWithReturn += 1;
@@ -123,8 +130,8 @@ const SELECT = {
   status: true,
   openedAt: true,
   closedAt: true,
-  cachedReturnPct: true,
   cachedUnpriced: true,
+  ...TOTAL_RETURN_SELECT,
 } as const;
 
 export async function portfolioStats(portfolioId: string): Promise<Stats> {

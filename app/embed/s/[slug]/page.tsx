@@ -7,15 +7,18 @@ export const dynamic = "force-dynamic";
 
 /**
  * The public embed for a WHOLE PUBLICATION — every public portfolio in the
- * service, merged into one open table and one closed table.
+ * service, either grouped into one section per sub-portfolio (each with its own
+ * total return vs its benchmark) or merged into one open and one closed table.
  *
- * `?only=` narrows that to named portfolios, which is how a service embed
- * leaves out a book that should not appear on a given page. It can only ever
- * subtract: visibility decides what is eligible in the first place, so naming a
- * private slug here publishes nothing.
+ * Visibility decides what is eligible; nothing in the query string can publish
+ * a private book. To embed a single sub-portfolio, use /embed/p/<slug>.
  *
- * Query params:  ?show=open|closed|both  &returns=0  &comments=0
- *                &only=slug-a,slug-b  &portfolio=0  &preview=1
+ * Query params:  ?layout=grouped|merged  &tabs=1 &all=0  &show=open|closed|both
+ *                &summary=benchmark|portfolio|none  &returns=0  &comments=0
+ *                &portfolio=0  &limit=N  &hide=slug-a,slug-b (legacy)
+ *                look: &theme=dark &bg=none|<hex> &cards=0 &accent=<hex>
+ *                      &font=serif &density=compact &corners=square &title=0
+ *                &preview=1 (signed-in managers only)
  */
 export default async function ServiceEmbed({
   params,
