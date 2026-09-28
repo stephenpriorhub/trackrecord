@@ -150,6 +150,7 @@ export const HIDEABLE_COLUMNS = [
   "buyupto",
   "stop",
   "held",
+  "weight",
 ];
 
 /** Closed rows rendered when the embed does not say otherwise. */
@@ -242,6 +243,13 @@ export interface EmbedRow {
   stopLoss: D | null;
   /** Whole days between open and close, for the Time Held column. */
   daysHeld: number | null;
+  /**
+   * This row's share of its position, for the equal-weighted total: 1 for a
+   * whole position, 0.5 for each half of one sold in halves, and so on. The
+   * rows of one position always sum to 1, so a partly sold position still
+   * counts once. Null when the position has no quantity to measure.
+   */
+  weight: number | null;
   unpriced: boolean;
   comment: string | null;
   /** Which book this row came from. Rendered only on a service embed. */
@@ -649,6 +657,12 @@ async function buildBlock(
   for (const portfolio of portfolios) {
     for (const p of portfolio.positions) {
       const single = p.legs.length === 1 ? p.legs[0] : null;
+      // Weights are measured on the first leg. Every leg of a spread moves in
+      // the same proportion, and the headline (total-return.ts) blends on the
+      // same quantities, so the column and the total always agree.
+      const ref = p.legs[0];
+      const refTotal = ref ? ref.openQty + ref.closedQty : 0;
+      const share = (qty: number) => (refTotal > 0 ? qty / refTotal : null);
       const base = {
         // A single-leg position shows its plain ticker (matching the mockup's
         // "$PRIVX"); a spread shows its built label, since no one ticker
@@ -675,6 +689,7 @@ async function buildBlock(
           currentPrice: d(p.cachedCurrentPrice),
           returnPct: d(p.cachedReturnPct),
           daysHeld: null,
+          weight: share(ref?.openQty ?? 0),
           unpriced: p.cachedUnpriced,
           comment: p.comments[0]?.body ?? null,
         });
@@ -699,6 +714,11 @@ async function buildBlock(
           currentPrice: exitPrice,
           returnPct,
           daysHeld: daysBetween(p.openedAt, exec.executedAt),
+          weight: share(
+            exec.fills
+              .filter((f) => f.leg.id === ref?.id)
+              .reduce((a, f) => a + f.quantity, 0),
+          ),
           unpriced: exitPrice === null,
           comment:
             exec.comments[0]?.body ?? exec.note ?? p.comments[0]?.body ?? null,

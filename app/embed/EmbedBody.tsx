@@ -73,6 +73,14 @@ export default function EmbedBody({ view }: { view: EmbedView }) {
             </div>
           )}
           <p className="pf-asof">{asOfLine(view.priceAsOf, view.priceSources)}</p>
+          {options.summary !== "none" && (
+            // The method, stated once. The Weight column shows it row by row.
+            <p className="pf-method">
+              How returns are weighted: every position counts as 1. When part of a
+              position is sold, it is split by size — sell half and the closed half
+              counts 0.5 and the half still held counts 0.5.
+            </p>
+          )}
         </header>
 
         {options.tabs && (
@@ -161,11 +169,14 @@ function Summary({
           <span className="dim">since {day(block.benchmarkFrom)}</span>
         )}
       </p>
-      {block.partials > 0 && (
+      {block.measured > 0 && (
         <p className="pf-basis">
-          Total return per position, equal-weighted across {block.measured}{" "}
-          position{block.measured === 1 ? "" : "s"} — includes realized gains
-          on {block.partials} partially closed.
+          Equal-weighted across {block.measured} position
+          {block.measured === 1 ? "" : "s"}
+          {block.partials > 0
+            ? `, including ${block.partials} partly closed (counted by size)`
+            : ""}
+          .
         </p>
       )}
     </>
@@ -362,6 +373,7 @@ function columnsFor(kind: "open" | "closed", options: EmbedOptions): Column[] {
             cell: (r) => (r.unpriced ? <span className="dim">—</span> : money(r.currentPrice)),
           },
           options.returns && { key: "return", label: "% Change", cell: (r) => <Pct v={r.returnPct} /> },
+          options.returns && on("weight") && weightColumn,
           on("buyupto") && { key: "buyupto", label: "Buy Up To Price", cell: (r) => money(r.buyUpTo) },
           on("stop") && { key: "stop", label: "Stop-Loss", cell: (r) => money(r.stopLoss) },
           options.comments && commentColumn,
@@ -374,6 +386,7 @@ function columnsFor(kind: "open" | "closed", options: EmbedOptions): Column[] {
           on("entry") && { key: "entry", label: "Entry Price", cell: (r) => money(r.entryPrice) },
           on("current") && { key: "current", label: "Closed Price", cell: (r) => money(r.currentPrice) },
           options.returns && { key: "return", label: "Gain or Loss %", cell: (r) => <Pct v={r.returnPct} /> },
+          options.returns && on("weight") && weightColumn,
           on("held") && {
             key: "held",
             label: "Time Held",
@@ -384,6 +397,25 @@ function columnsFor(kind: "open" | "closed", options: EmbedOptions): Column[] {
         ];
   return all.filter((c): c is Column => c !== false);
 }
+
+/**
+ * "1" for a whole position, "0.5" for each half of one sold in halves. Shown
+ * beside the return so a reader can see how each line counts toward the
+ * headline. Only alongside returns: a weight with no return beside it
+ * explains nothing.
+ */
+const weightColumn: Column = {
+  key: "weight",
+  label: "Weight",
+  className: "wt",
+  cell: (r) =>
+    r.weight === null ? (
+      <span className="dim">—</span>
+    ) : (
+      // Up to two decimals, trailing zeros dropped: 1, 0.5, 0.33.
+      String(Number(r.weight.toFixed(2)))
+    ),
+};
 
 const commentColumn: Column = {
   key: "comments",
@@ -429,6 +461,8 @@ const CSS = `
 .pf-summary .dim { font-size: 13px; }
 .pf-basis { margin: 4px 0 0; font-size: 12px; color: var(--pf-muted); }
 .pf-asof { margin: 8px 0 0; font-size: 12px; color: var(--pf-muted); }
+.pf-method { margin: 4px 0 0; font-size: 12px; color: var(--pf-muted); max-width: 70ch; }
+.pf .wt { color: var(--pf-muted); font-variant-numeric: tabular-nums; }
 .pf-preview { margin: 0 0 14px; padding: 10px 14px; border-radius: 10px; font-size: 13px;
               font-weight: 600; color: #92400e; background: #fef3c7; border: 1px solid #fcd34d; }
 .pf-books { margin: 0 0 8px; font-size: 13px; color: var(--pf-muted); }

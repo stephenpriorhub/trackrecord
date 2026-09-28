@@ -46,6 +46,7 @@ const OPTIONAL_COLUMNS = [
   { key: "stop", label: "Stop-loss", open: true, closed: false },
   { key: "held", label: "Time held", open: false, closed: true },
   { key: "company", label: "Company", open: true, closed: true },
+  { key: "weight", label: "Weight", open: true, closed: true },
 ];
 
 /** Matches DEFAULT_CLOSED_LIMIT in lib/managed/embed.ts. */
@@ -458,9 +459,11 @@ export default function EmbedBuilder({
           </Group>
         </div>
         <p className="mt-2 text-xs text-gray-600">
-          The header return is each position&apos;s total return — realized exits
-          plus what&apos;s still held — so a partly sold position counts once and in
-          full. It always covers the whole record, whatever the row limit.
+          Returns are equal-weighted: every position counts as 1. A partly sold
+          position is split by size — sell half and each half counts 0.5 — so it
+          still counts once in total. The Weight column shows each row&apos;s share,
+          and the embed states the method under the header. The header always
+          covers the whole record, whatever the row limit.
         </p>
       </Panel>
 
