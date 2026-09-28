@@ -61,9 +61,15 @@ export default function EmbedBody({ view }: { view: EmbedView }) {
               {view.included.map((b) => b.name).join(" · ")}
             </p>
           )}
-          {options.summary !== "none" && (
+          {options.summary !== "none" && options.total && (
             <div data-pf-overall>
-              <Summary block={view} options={options} />
+              <Summary
+                block={view}
+                options={options}
+                // Says exactly what the figure covers — never the publication's
+                // name over a subset of it.
+                label={view.totalLabel}
+              />
             </div>
           )}
           <p className="pf-asof">{asOfLine(view.priceAsOf, view.priceSources)}</p>
@@ -120,7 +126,15 @@ export default function EmbedBody({ view }: { view: EmbedView }) {
  * the marked remainder blended — so a partly sold winner counts once and counts
  * in full. The index is measured over the same window, from the book's start.
  */
-function Summary({ block, options }: { block: EmbedBlock; options: EmbedOptions }) {
+function Summary({
+  block,
+  options,
+  label,
+}: {
+  block: EmbedBlock;
+  options: EmbedOptions;
+  label?: string;
+}) {
   const compare =
     options.summary === "benchmark" &&
     block.showBenchmark &&
@@ -129,7 +143,7 @@ function Summary({ block, options }: { block: EmbedBlock; options: EmbedOptions 
     <>
       <p className="pf-summary">
         <span>
-          <strong>{block.title.replace(/ Portfolio$/, "")}:</strong>{" "}
+          <strong>{label ?? block.title.replace(/ Portfolio$/, "")}:</strong>{" "}
           <Pct v={block.portfolioReturn} />
         </span>
         {/* Only when the page asked for a comparison AND there is one to make.
@@ -271,35 +285,7 @@ function Section({
   note?: string | null;
 }) {
   const Heading = level === 2 ? "h2" : "h3";
-  // Only a merged service embed carries this column; on a single book every row
-  // would answer the same, which is just noise.
-  const book = options.portfolioColumn;
-  const cols: string[] =
-    kind === "open"
-      ? [
-          "Date Added",
-          "Stock",
-          ...(book ? ["Portfolio"] : []),
-          "Entry Price",
-          "Underlying Company",
-          "Current Price",
-          ...(options.returns ? ["% Change"] : []),
-          "Buy Up To Price",
-          "Stop-Loss",
-          ...(options.comments ? ["Comments"] : []),
-        ]
-      : [
-          "Date Added",
-          "Date Closed",
-          "Stock",
-          ...(book ? ["Portfolio"] : []),
-          "Entry Price",
-          "Closed Price",
-          ...(options.returns ? ["Gain or Loss %"] : []),
-          "Time Held",
-          "Underlying Company",
-          ...(options.comments ? ["Comments"] : []),
-        ];
+  const cols = columnsFor(kind, options);
 
   return (
     <section className="pf-card">
@@ -313,65 +299,22 @@ function Section({
           <thead>
             <tr>
               {cols.map((c) => (
-                <th key={c}>{c}</th>
+                <th key={c.key}>{c.label}</th>
               ))}
             </tr>
           </thead>
           <tbody>
             {rows.map((r) => (
               <tr key={r.id}>
-                <td data-label="Date Added">{day(r.openedAt)}</td>
-                {kind === "closed" && <td data-label="Date Closed">{day(r.closedAt)}</td>}
-                <td data-label="Stock" className="sym">
-                  ${r.ticker}
-                </td>
-                {book && (
-                  <td data-label="Portfolio" className="book">
-                    {r.portfolioName}
+                {cols.map((c) => (
+                  <td
+                    key={c.key}
+                    data-label={c.label}
+                    className={typeof c.className === "function" ? c.className(r) : c.className}
+                  >
+                    {c.cell(r)}
                   </td>
-                )}
-                <td data-label="Entry Price">
-                  <Money v={r.entryPrice} />
-                </td>
-                <td data-label={kind === "open" ? "Underlying Company" : "Closed Price"}>
-                  {kind === "open" ? (
-                    (r.companyName ?? "—")
-                  ) : (
-                    <Money v={r.currentPrice} />
-                  )}
-                </td>
-                {kind === "open" && (
-                  <td data-label="Current Price">
-                    {r.unpriced ? <span className="dim">—</span> : <Money v={r.currentPrice} />}
-                  </td>
-                )}
-                {options.returns && (
-                  <td data-label={kind === "open" ? "% Change" : "Gain or Loss %"}>
-                    <Pct v={r.returnPct} />
-                  </td>
-                )}
-                {kind === "open" ? (
-                  <>
-                    <td data-label="Buy Up To Price">
-                      <Money v={r.buyUpTo} />
-                    </td>
-                    <td data-label="Stop-Loss">
-                      <Money v={r.stopLoss} />
-                    </td>
-                  </>
-                ) : (
-                  <>
-                    <td data-label="Time Held">{r.daysHeld === null ? "—" : `${r.daysHeld}d`}</td>
-                    <td data-label="Underlying Company">{r.companyName ?? "—"}</td>
-                  </>
-                )}
-                {options.comments && (
-                  // `blank` hides the row entirely in the stacked mobile layout:
-                  // a "Comments" label with nothing beside it reads as broken.
-                  <td data-label="Comments" className={r.comment ? "cmt" : "cmt blank"}>
-                    {r.comment ?? ""}
-                  </td>
-                )}
+                ))}
               </tr>
             ))}
           </tbody>
@@ -380,6 +323,76 @@ function Section({
     </section>
   );
 }
+
+interface Column {
+  key: string;
+  label: string;
+  cell: (r: EmbedRow) => React.ReactNode;
+  className?: string | ((r: EmbedRow) => string);
+}
+
+/**
+ * The columns each table shows, in order, minus any the page switched off.
+ *
+ * One list drives both the header and every cell, so a hidden column can never
+ * leave the header and the body out of step. Stock is never optional: a row
+ * with no ticker is not a position anyone can read.
+ */
+function columnsFor(kind: "open" | "closed", options: EmbedOptions): Column[] {
+  const on = (key: string) => !options.hideColumns.includes(key);
+  const money = (v: D | null) => <Money v={v} />;
+  const company: Column = {
+    key: "company",
+    label: "Underlying Company",
+    cell: (r) => r.companyName ?? "—",
+  };
+  const all: (Column | false)[] =
+    kind === "open"
+      ? [
+          on("added") && { key: "added", label: "Date Added", cell: (r) => day(r.openedAt) },
+          { key: "stock", label: "Stock", className: "sym", cell: (r) => `$${r.ticker}` },
+          // Only a merged service embed carries this column; on a single book
+          // every row would answer the same, which is just noise.
+          options.portfolioColumn && { key: "portfolio", label: "Portfolio", className: "book", cell: (r) => r.portfolioName },
+          on("entry") && { key: "entry", label: "Entry Price", cell: (r) => money(r.entryPrice) },
+          on("company") && company,
+          on("current") && {
+            key: "current",
+            label: "Current Price",
+            cell: (r) => (r.unpriced ? <span className="dim">—</span> : money(r.currentPrice)),
+          },
+          options.returns && { key: "return", label: "% Change", cell: (r) => <Pct v={r.returnPct} /> },
+          on("buyupto") && { key: "buyupto", label: "Buy Up To Price", cell: (r) => money(r.buyUpTo) },
+          on("stop") && { key: "stop", label: "Stop-Loss", cell: (r) => money(r.stopLoss) },
+          options.comments && commentColumn,
+        ]
+      : [
+          on("added") && { key: "added", label: "Date Added", cell: (r) => day(r.openedAt) },
+          on("closed") && { key: "closed", label: "Date Closed", cell: (r) => day(r.closedAt) },
+          { key: "stock", label: "Stock", className: "sym", cell: (r) => `$${r.ticker}` },
+          options.portfolioColumn && { key: "portfolio", label: "Portfolio", className: "book", cell: (r) => r.portfolioName },
+          on("entry") && { key: "entry", label: "Entry Price", cell: (r) => money(r.entryPrice) },
+          on("current") && { key: "current", label: "Closed Price", cell: (r) => money(r.currentPrice) },
+          options.returns && { key: "return", label: "Gain or Loss %", cell: (r) => <Pct v={r.returnPct} /> },
+          on("held") && {
+            key: "held",
+            label: "Time Held",
+            cell: (r) => (r.daysHeld === null ? "—" : `${r.daysHeld}d`),
+          },
+          on("company") && company,
+          options.comments && commentColumn,
+        ];
+  return all.filter((c): c is Column => c !== false);
+}
+
+const commentColumn: Column = {
+  key: "comments",
+  label: "Comments",
+  // `blank` hides the cell entirely in the stacked mobile layout: a "Comments"
+  // label with nothing beside it reads as broken.
+  className: (r) => (r.comment ? "cmt" : "cmt blank"),
+  cell: (r) => r.comment ?? "",
+};
 
 /**
  * Self-contained CSS. No Tailwind and no external stylesheet: this page is

@@ -14,8 +14,9 @@
  * rewrites the code AND the live preview beside it, so what you see is exactly
  * what you paste.
  *
- * The first choice is WHAT to embed: the entire publication (grouped by
- * sub-portfolio, or merged into one table) or a single sub-portfolio. "Entire publication" names no books in its URL, so a portfolio
+ * The first choice is WHAT to embed: every portfolio in the publication, any
+ * combination of them, or just one. Several are grouped by sub-portfolio (or
+ * merged into one table); one on its own is simply that portfolio's embed. "Entire publication" names no books in its URL, so a portfolio
  * added next month appears on every page that already embeds it. A single
  * sub-portfolio is simply that portfolio's own embed URL.
  */
@@ -32,9 +33,23 @@ const SUMMARY_LABELS: Record<Summary, string> = {
   none: "None",
 };
 
+/**
+ * Columns that can be switched off, keyed as HIDEABLE_COLUMNS in
+ * lib/managed/embed.ts, with which table(s) each appears in.
+ */
+const OPTIONAL_COLUMNS = [
+  { key: "added", label: "Date added", open: true, closed: true },
+  { key: "closed", label: "Date closed", open: false, closed: true },
+  { key: "entry", label: "Entry price", open: true, closed: true },
+  { key: "current", label: "Current / closed price", open: true, closed: true },
+  { key: "buyupto", label: "Buy up to", open: true, closed: false },
+  { key: "stop", label: "Stop-loss", open: true, closed: false },
+  { key: "held", label: "Time held", open: false, closed: true },
+  { key: "company", label: "Company", open: true, closed: true },
+];
+
 /** Matches DEFAULT_CLOSED_LIMIT in lib/managed/embed.ts. */
 const DEFAULT_LIMIT = 200;
-const ALL = "__all__";
 
 export interface EmbedBook {
   slug: string;
@@ -59,7 +74,7 @@ export default function EmbedBuilder({
   /** Publications this person may manage, each with the portfolios they may see. */
   services: EmbedService[];
   initialService?: string;
-  /** A portfolio slug to open on, or omitted for the entire publication. */
+  /** A portfolio slug to open on alone, or omitted for the entire publication. */
   initialTarget?: string;
 }) {
   // ---- what ----
@@ -71,8 +86,10 @@ export default function EmbedBuilder({
   const service = services.find((sv) => sv.slug === serviceSlug) ?? services[0];
   const books = service?.books ?? [];
   const slug = service?.slug ?? "";
-  const [target, setTarget] = useState<string>(
-    initialTarget && books.some((b) => b.slug === initialTarget) ? initialTarget : ALL,
+  // null = EVERY portfolio, including ones added later (no list in the URL).
+  // A list = exactly these, in the publication's own display order.
+  const [picked, setPicked] = useState<string[] | null>(
+    initialTarget && books.some((b) => b.slug === initialTarget) ? [initialTarget] : null,
   );
   const [layout, setLayout] = useState<Layout>("grouped");
   const [tabs, setTabs] = useState(true);
@@ -84,6 +101,10 @@ export default function EmbedBuilder({
   const [comments, setComments] = useState(true);
   const [bookColumn, setBookColumn] = useState(true);
   const [limit, setLimit] = useState(DEFAULT_LIMIT);
+  const [hiddenCols, setHiddenCols] = useState<string[]>([]);
+  // ---- publication total ----
+  const [showTotal, setShowTotal] = useState(true);
+  const [notInTotal, setNotInTotal] = useState<string[]>([]);
   // ---- look ----
   const [theme, setTheme] = useState<"light" | "dark">("light");
   const [bg, setBg] = useState<Bg>("default");
@@ -99,26 +120,52 @@ export default function EmbedBuilder({
   const [autoHeight, setAutoHeight] = useState(true);
   const [copied, setCopied] = useState(false);
 
-  const whole = target === ALL;
-  const chosen = whole ? null : (books.find((b) => b.slug === target) ?? null);
-  const multi = whole && books.length > 1;
-  const targetPublic = chosen ? chosen.isPublic : books.some((b) => b.isPublic);
+  const selected = picked
+    ? books.filter((b) => picked.includes(b.slug))
+    : books;
+  // One portfolio on its own is that portfolio's embed; two or more are a
+  // publication embed narrowed (or not) to them.
+  const chosen = selected.length === 1 ? selected[0] : null;
+  const whole = !chosen;
+  const multi = selected.length > 1;
+  const subset = picked !== null && selected.length < books.length;
+  const targetPublic = selected.some((b) => b.isPublic);
+  // A merged table's only headline IS the total, so it cannot be switched off
+  // there; it can still leave books out of it.
+  const totalShown = whole && summary !== "none" && (layout === "merged" || showTotal);
+
+  function toggleBook(bookSlug: string) {
+    const current = selected.map((b) => b.slug);
+    const next = current.includes(bookSlug)
+      ? current.filter((x) => x !== bookSlug)
+      : [...current, bookSlug];
+    if (next.length === 0) return; // at least one must stay selected
+    // Ticking every box is the same as "all", and "all" is the better URL:
+    // it picks up portfolios added later.
+    setPicked(next.length === books.length ? null : next);
+  }
 
   const url = useMemo(() => {
     const p = new URLSearchParams();
     // Only non-default values go in, so the common case is a clean URL.
     if (whole) {
+      if (subset) p.set("only", selected.map((b) => b.slug).join(","));
       if (layout === "grouped") p.set("layout", "grouped");
       if (layout === "grouped" && tabs && multi) {
         p.set("tabs", "1");
         if (!allTab) p.set("all", "0");
       }
       if (layout === "merged" && !bookColumn) p.set("portfolio", "0");
+      if (layout === "grouped" && !showTotal) p.set("total", "0");
+      // Only books actually in the embed; a stale slug would be meaningless.
+      const excluded = notInTotal.filter((x) => selected.some((b) => b.slug === x));
+      if (totalShown && excluded.length) p.set("exclude", excluded.join(","));
     }
     if (show !== "both") p.set("show", show);
     if (summary !== "benchmark") p.set("summary", summary);
     if (!returns) p.set("returns", "0");
     if (!comments) p.set("comments", "0");
+    if (hiddenCols.length) p.set("hidecols", hiddenCols.join(","));
     if (limit !== DEFAULT_LIMIT) p.set("limit", String(limit));
     if (theme === "dark") p.set("theme", "dark");
     if (bg === "none") p.set("bg", "none");
@@ -134,7 +181,8 @@ export default function EmbedBuilder({
     const path = whole || !chosen ? `s/${slug}` : `p/${chosen.slug}`;
     return `${origin}/embed/${path}${qs ? `?${qs}` : ""}`;
   }, [
-    origin, slug, whole, chosen, multi, layout, tabs, allTab, bookColumn, show, summary,
+    origin, slug, whole, chosen, multi, subset, selected, layout, tabs, allTab, bookColumn, show, summary,
+    showTotal, notInTotal, totalShown, hiddenCols,
     returns, comments, limit, theme, bg, bgColor, cards, accentOn, accent, font,
     density, corners, title,
   ]);
@@ -203,32 +251,14 @@ export default function EmbedBuilder({
                 value={serviceSlug}
                 onChange={(e) => {
                   setServiceSlug(e.target.value);
-                  // A portfolio slug from another publication means nothing here.
-                  setTarget(ALL);
+                  // Portfolio slugs from another publication mean nothing here.
+                  setPicked(null);
                 }}
                 className="min-w-56 rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-gray-100"
               >
                 {services.map((sv) => (
                   <option key={sv.slug} value={sv.slug}>
                     {sv.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-
-            <label className="block">
-              <span className="mb-1.5 block text-xs uppercase tracking-wide text-gray-500">
-                Portfolio
-              </span>
-              <select
-                value={target}
-                onChange={(e) => setTarget(e.target.value)}
-                className="min-w-64 rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-gray-100"
-              >
-                <option value={ALL}>Entire publication — all portfolios</option>
-                {books.map((b) => (
-                  <option key={b.slug} value={b.slug}>
-                    {b.name} ({b.positions}){b.isPublic ? "" : " — private"}
                   </option>
                 ))}
               </select>
@@ -258,12 +288,58 @@ export default function EmbedBuilder({
               </Group>
             )}
           </div>
+
+          <div className="mt-4">
+            <div className="mb-1.5 flex items-center gap-3">
+              <span className="text-xs uppercase tracking-wide text-gray-500">Portfolios</span>
+              <button
+                type="button"
+                onClick={() => setPicked(null)}
+                disabled={picked === null}
+                className="text-xs text-blue-400 hover:underline disabled:cursor-default disabled:text-gray-600 disabled:no-underline"
+              >
+                {picked === null ? "All selected" : "Select all"}
+              </button>
+            </div>
+            <div className="flex flex-wrap gap-1.5">
+              {books.map((b) => {
+                const on = selected.some((x) => x.slug === b.slug);
+                return (
+                  <button
+                    key={b.slug}
+                    type="button"
+                    role="checkbox"
+                    aria-checked={on}
+                    onClick={() => toggleBook(b.slug)}
+                    className={`inline-flex items-center gap-2 rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${
+                      on
+                        ? "bg-blue-600 text-white"
+                        : "border border-gray-700 bg-gray-800 text-gray-400 hover:text-gray-200"
+                    }`}
+                  >
+                    <span
+                      aria-hidden
+                      className={`flex h-3.5 w-3.5 items-center justify-center rounded-sm border text-[10px] leading-none ${
+                        on ? "border-white bg-white text-blue-600" : "border-gray-500"
+                      }`}
+                    >
+                      {on ? "✓" : ""}
+                    </span>
+                    {b.name}
+                    <span className="opacity-60">{b.positions}</span>
+                    {!b.isPublic && <span className="text-yellow-400/80">private</span>}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
           <p className="mt-2 text-xs text-gray-600">
             {!whole
               ? "Just this portfolio, with its own return against the S&P 500 since it started."
               : layout === "grouped"
-                ? `The publication's overall return up top, then each portfolio as its own section with its own return vs the S&P 500 since that portfolio began.${tabs && multi ? (allTab ? " Readers switch between portfolios with tabs across the top, starting on All portfolios." : " Readers switch between portfolios with tabs across the top, starting on the first portfolio; there is no All view.") : ""} Portfolios added later appear automatically.`
-                : "Every portfolio merged into one open table and one closed table. Portfolios added later appear automatically."}
+                ? `The publication's overall return up top, then each portfolio as its own section with its own return vs the S&P 500 since that portfolio began.${tabs && multi ? (allTab ? " Readers switch between portfolios with tabs across the top, starting on All portfolios." : " Readers switch between portfolios with tabs across the top, starting on the first portfolio; there is no All view.") : ""}${subset ? " Only the portfolios ticked above." : " Portfolios added later appear automatically."}`
+                : `The selected portfolios merged into one open table and one closed table.${subset ? "" : " Portfolios added later appear automatically."}`}
             {whole && books.some((b) => !b.isPublic) && (
               <>
                 {" "}
@@ -274,6 +350,53 @@ export default function EmbedBuilder({
             )}
           </p>
         </Panel>
+
+      {whole && summary !== "none" && (
+        <Panel title="Publication total">
+          <div className="flex flex-wrap gap-4">
+            {layout === "grouped" && (
+              <Group label="Total return">
+                <Choice active={showTotal} onClick={() => setShowTotal(true)}>
+                  Show
+                </Choice>
+                <Choice active={!showTotal} onClick={() => setShowTotal(false)}>
+                  Hide — portfolio returns only
+                </Choice>
+              </Group>
+            )}
+            {totalShown && (
+              <Group label="Count in the total">
+                {selected.map((b) => {
+                  const counted = !notInTotal.includes(b.slug);
+                  return (
+                    <Choice
+                      key={b.slug}
+                      active={counted}
+                      onClick={() =>
+                        setNotInTotal((prev) =>
+                          counted ? [...prev, b.slug] : prev.filter((x) => x !== b.slug),
+                        )
+                      }
+                    >
+                      {counted ? "✓ " : ""}
+                      {b.name}
+                    </Choice>
+                  );
+                })}
+              </Group>
+            )}
+          </div>
+          <p className="mt-2 text-xs text-gray-600">
+            {!totalShown
+              ? "No publication-wide figure — each portfolio shows its own return vs the S&P 500."
+              : selected.every((b) => notInTotal.includes(b.slug))
+                ? "Every portfolio is left out, so no total will show."
+                : notInTotal.some((x) => selected.some((b) => b.slug === x))
+                  ? "Unticked portfolios still appear in the embed with their own return, but are left out of the total — and the total's label says so."
+                  : "Untick a portfolio to keep it in the embed but leave it out of the total. Portfolios not in the embed are never counted."}
+          </p>
+        </Panel>
+      )}
 
       <Panel title="Content">
         <div className="flex flex-wrap gap-4">
@@ -305,6 +428,25 @@ export default function EmbedBuilder({
                 Portfolio name
               </Choice>
             )}
+            {OPTIONAL_COLUMNS.filter(
+              (c) =>
+                (show !== "closed" || c.closed) && (show !== "open" || c.open),
+            ).map((c) => {
+              const on = !hiddenCols.includes(c.key);
+              return (
+                <Choice
+                  key={c.key}
+                  active={on}
+                  onClick={() =>
+                    setHiddenCols((prev) =>
+                      on ? [...prev, c.key] : prev.filter((x) => x !== c.key),
+                    )
+                  }
+                >
+                  {c.label}
+                </Choice>
+              );
+            })}
           </Group>
 
           <Group label={whole && layout === "grouped" ? "Closed rows per portfolio" : "Closed rows"}>

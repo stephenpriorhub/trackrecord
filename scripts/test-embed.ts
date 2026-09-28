@@ -125,6 +125,21 @@ check("nothing but hex reaches CSS", () => {
   assert.equal(parseEmbedOptions({ bg: "#FFF" }).look.background, "#FFF");
 });
 
+check("only= parses a subset", () => {
+  assert.deepEqual(parseEmbedOptions({ only: "ai,space" }).only, ["ai", "space"]);
+  assert.deepEqual(parseEmbedOptions({}).only, []);
+});
+
+check("column, total and exclude options parse", () => {
+  const o = parseEmbedOptions({ hidecols: "buyupto,stop,bogus", total: "0", exclude: "d25" });
+  assert.deepEqual(o.hideColumns, ["buyupto", "stop"]);
+  assert.equal(o.total, false);
+  assert.deepEqual(o.excludeFromTotal, ["d25"]);
+  const d = parseEmbedOptions({});
+  assert.deepEqual(d.hideColumns, []);
+  assert.equal(d.total, true);
+});
+
 check("legacy hide= still parses for live iframes", () => {
   assert.deepEqual(parseEmbedOptions({ hide: "a, b" }).hide, ["a", "b"]);
 });

@@ -84,6 +84,34 @@ export interface EmbedOptions {
    */
   hide: string[];
   /**
+   * Portfolio slugs to INCLUDE in a service embed — a chosen subset. Empty
+   * means every eligible portfolio, including ones added later, which is why
+   * the builder only writes this when the reader picked fewer than all.
+   *
+   * Like `hide`, it can only narrow: a private slug listed here publishes
+   * nothing.
+   */
+  only: string[];
+  /**
+   * Portfolio slugs still SHOWN but left out of the publication's total
+   * return — e.g. a model index like Disruptor 25 that should not blend into
+   * a newsletter's own record. Its own section keeps its own return.
+   * Portfolios not in the embed at all are never in the total either.
+   */
+  excludeFromTotal: string[];
+  /**
+   * false hides the publication-wide total, leaving each sub-portfolio's own
+   * return and comparison. Only meaningful on a grouped service embed.
+   */
+  total: boolean;
+  /**
+   * Table columns to leave out, by key: added, closed, entry, company,
+   * current, buyupto, stop, held. (% and Comments keep their own flags,
+   * `returns` and `comments`, which predate this list.) Stock is never
+   * optional.
+   */
+  hideColumns: string[];
+  /**
    * Whether rows carry the portfolio they came from. Only meaningful on a
    * MERGED service embed; grouped blocks already say which book they are.
    */
@@ -112,6 +140,18 @@ export interface EmbedOptions {
   look: EmbedLook;
 }
 
+/** Column keys `hidecols=` accepts. Anything else is ignored. */
+export const HIDEABLE_COLUMNS = [
+  "added",
+  "closed",
+  "entry",
+  "company",
+  "current",
+  "buyupto",
+  "stop",
+  "held",
+];
+
 /** Closed rows rendered when the embed does not say otherwise. */
 export const DEFAULT_CLOSED_LIMIT = 200;
 
@@ -136,6 +176,14 @@ export function parseEmbedOptions(
   const on = (v: string | undefined) =>
     v === "1" || v === "true" || v === "yes";
   const hide = one(sp.hide);
+  const only = one(sp.only);
+  const list = (v: string | undefined) =>
+    v
+      ? v
+          .split(",")
+          .map((s) => s.trim())
+          .filter(Boolean)
+      : [];
   const bg = one(sp.bg);
   return {
     show: show === "open" || show === "closed" ? show : "both",
@@ -150,12 +198,11 @@ export function parseEmbedOptions(
       return "benchmark";
     })(),
     comments: !off(one(sp.comments)),
-    hide: hide
-      ? hide
-          .split(",")
-          .map((s) => s.trim())
-          .filter(Boolean)
-      : [],
+    hide: list(hide),
+    only: list(only),
+    excludeFromTotal: list(one(sp.exclude)),
+    total: !off(one(sp.total)),
+    hideColumns: list(one(sp.hidecols)).filter((c) => HIDEABLE_COLUMNS.includes(c)),
     portfolioColumn: !off(one(sp.portfolio)),
     limit: (() => {
       const raw = one(sp.limit);
@@ -249,6 +296,19 @@ export interface EmbedView extends EmbedBlock {
    * Empty otherwise. The view's own fields are then the publication overall.
    */
   groups: EmbedBlock[];
+  /**
+   * True when a service embed shows FEWER than all of its eligible portfolios
+   * (via only= or hide=). The headline then covers only those, so it must not
+   * be labelled as the publication's return.
+   */
+  narrowed: boolean;
+  /**
+   * What the headline figure is called. The publication's name when it covers
+   * every portfolio; otherwise it says exactly what it covers, because a
+   * figure labelled "McCall Innovation Report" must not quietly leave a book
+   * out.
+   */
+  totalLabel: string;
   /**
    * True when a PRIVATE or archived portfolio is on screen because an
    * authorised manager asked to preview it. The page renders a banner off this
@@ -429,9 +489,11 @@ export async function loadServiceEmbed(
     ...(allowPrivate ? {} : { visibility: "PUBLIC", archivedAt: null }),
   });
 
-  const eligible = options.hide.length
-    ? all.filter((p) => !options.hide.includes(p.slug))
-    : all;
+  const eligible = all.filter(
+    (p) =>
+      (options.only.length === 0 || options.only.includes(p.slug)) &&
+      !options.hide.includes(p.slug),
+  );
   // An empty service embed is a wrong link, not a blank page: 404 rather than
   // publish a table with nothing in it.
   if (eligible.length === 0) return null;
@@ -449,7 +511,20 @@ export async function loadServiceEmbed(
     eligible[0].benchmarkTicker;
 
   const grouped = options.layout === "grouped";
+  const narrowed = eligible.length < all.length;
+  const counted = eligible.filter(
+    (p) => !options.excludeFromTotal.includes(p.slug),
+  );
+  const excluded = eligible.filter((p) =>
+    options.excludeFromTotal.includes(p.slug),
+  );
+  const base = narrowed ? "Selected portfolios" : service.name;
+  const totalLabel = excluded.length
+    ? `${base} (excl. ${excluded.map((p) => p.name).join(", ")})`
+    : base;
   return buildView(eligible, {
+    totalOver: excluded.length ? counted : undefined,
+    totalLabel,
     kind: "service",
     title: service.name,
     description: null,
@@ -461,7 +536,11 @@ export async function loadServiceEmbed(
       // Each grouped block already names its book; a column would repeat it.
       portfolioColumn: grouped ? false : options.portfolioColumn,
       tabs: grouped && options.tabs && eligible.length > 1,
+      // Nothing left to total, or a merged table (whose only headline IS the
+      // total) — either way the switch has no separate meaning.
+      total: counted.length > 0 && (grouped ? options.total : true),
     },
+    narrowed,
     preview: eligible.some(
       (p) => p.visibility !== "PUBLIC" || p.archivedAt !== null,
     ),
@@ -480,6 +559,10 @@ async function buildView(
     showBenchmark: boolean;
     options: EmbedOptions;
     preview: boolean;
+    narrowed?: boolean;
+    totalLabel?: string;
+    /** The portfolios the headline is computed over, when fewer than shown. */
+    totalOver?: LoadedPortfolio[];
   },
 ): Promise<EmbedView> {
   const options = meta.options;
@@ -489,6 +572,7 @@ async function buildView(
   // book's grouped section can never disagree with its own single embed.
   const [whole, groups] = await Promise.all([
     buildBlock(portfolios, {
+      headlineOver: meta.totalOver,
       slug: null,
       title: meta.title,
       description: meta.description,
@@ -527,6 +611,8 @@ async function buildView(
     })),
     groups,
     preview: meta.preview,
+    narrowed: meta.narrowed ?? false,
+    totalLabel: meta.totalLabel ?? meta.title.replace(/ Portfolio$/, ""),
     priceAsOf: oldestPriceAt(allPositions),
     priceSources: [
       ...new Set(
@@ -547,6 +633,8 @@ async function buildView(
 async function buildBlock(
   portfolios: LoadedPortfolio[],
   meta: {
+    /** Compute the headline over these instead of every portfolio shown. */
+    headlineOver?: LoadedPortfolio[];
     slug: string | null;
     title: string;
     description: string | null;
@@ -633,7 +721,8 @@ async function buildBlock(
   // It still follows whichever tables the reader can see: "open" means
   // positions with anything still held (their total includes realized exits),
   // "closed" means positions fully exited.
-  const positions = portfolios.flatMap((p) => p.positions);
+  const counted = meta.headlineOver ?? portfolios;
+  const positions = counted.flatMap((p) => p.positions);
   const inScope = positions.filter((p) => {
     const held = p.legs.some((l) => l.openQty > 0);
     if (meta.options.show === "open") return held;
@@ -656,7 +745,9 @@ async function buildBlock(
   // The benchmark runs from the portfolio's start date to now — the same window
   // the positions cover. (It was once the index's SESSION change, which put one
   // day of SPY next to a multi-year return.)
-  const benchmarkFrom = benchmarkStartFor(portfolios);
+  // Over the same books as the headline, so an excluded portfolio's earlier
+  // start cannot stretch the index's window.
+  const benchmarkFrom = benchmarkStartFor(counted);
   const comparison = meta.showBenchmark
     ? await benchmarkSince(meta.benchmarkTicker, benchmarkFrom)
     : null;

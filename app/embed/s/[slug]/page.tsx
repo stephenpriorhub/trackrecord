@@ -15,7 +15,9 @@ export const dynamic = "force-dynamic";
  *
  * Query params:  ?layout=grouped|merged  &tabs=1 &all=0  &show=open|closed|both
  *                &summary=benchmark|portfolio|none  &returns=0  &comments=0
- *                &portfolio=0  &limit=N  &hide=slug-a,slug-b (legacy)
+ *                &portfolio=0  &limit=N  &only=slug-a,slug-b
+ *                &total=0  &exclude=slug (shown, but not in the total)
+ *                &hidecols=added,closed,entry,company,current,buyupto,stop,held  &hide=slug-a,slug-b (legacy)
  *                look: &theme=dark &bg=none|<hex> &cards=0 &accent=<hex>
  *                      &font=serif &density=compact &corners=square &title=0
  *                &preview=1 (signed-in managers only)
