@@ -100,7 +100,7 @@ function airtableCodeFor(pubCode: string): string {
   );
 }
 
-async function fetchTradeGroupNames(): Promise<
+export async function fetchTradeGroupNames(): Promise<
   Map<string, { name: string; sort: number | null }>
 > {
   const rows = await airtableFetch(TRADE_GROUP_TABLE, {});

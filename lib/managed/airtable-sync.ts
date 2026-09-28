@@ -32,9 +32,12 @@
 import { prisma } from "../prisma";
 import { dec, type D } from "../money";
 import { recomputePosition } from "./positions";
+import { MAIN_PORTFOLIO_NAME } from "./portfolios";
 import {
   commitImport,
   fetchPub,
+  fetchTradeGroupNames,
+  one,
   isTradableTrade,
   name,
   numOrNull,
@@ -209,7 +212,20 @@ export function planPosition(
   const want = fingerprint(
     mapped.map((f) => ({ ...f, price: f.price.toString() })),
   );
-  return want === fingerprint(stored)
+  // Compare SHAPE, not scale. Positions imported before this sync were opened
+  // at 1 unit rather than 100; if the only difference is that uniform factor,
+  // the record is already right and rewriting it would be churn (3,500 War
+  // Room positions' worth). A partial exit changes the shape, so it still
+  // triggers a rebuild.
+  const openOf = (fs: { intent: string; quantity: number }[]) =>
+    fs.filter((f) => f.intent === "OPEN").reduce((a, f) => a + f.quantity, 0);
+  const storedOpen = openOf(stored);
+  const factor = storedOpen > 0 ? openOf(mapped) / storedOpen : 1;
+  const scaled = stored.map((f) => ({
+    ...f,
+    quantity: Math.round(f.quantity * factor),
+  }));
+  return want === fingerprint(scaled)
     ? { kind: "unchanged" }
     : { kind: "rebuild", fills: mapped };
 }
@@ -218,6 +234,8 @@ export interface SyncReport {
   pubCode: string;
   dryRun: boolean;
   created: number;
+  /** Dry run: Airtable positions not in Portfolio Manager yet, and where they would go. */
+  toCreate: { position: string; portfolio: string; newPortfolio: boolean; publicPortfolio: boolean; trades: string }[];
   rebuilt: { position: string; before: string; after: string }[];
   unchanged: number;
   conflicts: { position: string; reason: string }[];
@@ -251,6 +269,7 @@ export async function syncPublicationFromAirtable(
     pubCode,
     dryRun,
     created: 0,
+    toCreate: [],
     rebuilt: [],
     unchanged: 0,
     conflicts: [],
@@ -280,7 +299,15 @@ export async function syncPublicationFromAirtable(
     for (const e of imported.errors) report.errors.push(e);
   }
 
-  const { positions, tradesByPosition } = await fetchPub(pubCode);
+  const [{ positions, tradesByPosition }, groups] = await Promise.all([
+    fetchPub(pubCode),
+    fetchTradeGroupNames(),
+  ]);
+  const rename = TRADE_GROUP_MERGES[pubCode.toUpperCase()] ?? {};
+  const portfolios = await prisma.managedPortfolio.findMany({
+    where: { service: { pubCode }, archivedAt: null },
+    select: { name: true, visibility: true },
+  });
 
   for (const pos of positions) {
     const label = String(pos.fields["Position Name"] ?? pos.id);
@@ -297,8 +324,26 @@ export async function syncPublicationFromAirtable(
         },
       },
     });
-    // Not imported (a dry run, or skipped by the import): nothing to compare.
-    if (!managed || managed.deletedAt) continue;
+    if (!managed) {
+      // Only reachable on a dry run (apply imports first). Say where it would
+      // land, because a NEW portfolio starts private and would not appear on
+      // any embed until someone publishes it.
+      if (dryRun) {
+        const gid = one(pos.fields["Trade Group"]) ?? null;
+        const raw = (gid && groups.get(gid)?.name) || MAIN_PORTFOLIO_NAME;
+        const target = rename[raw] ?? raw;
+        const existing = portfolios.find((p) => p.name === target);
+        report.toCreate.push({
+          position: label,
+          portfolio: target,
+          newPortfolio: !existing,
+          publicPortfolio: existing?.visibility === "PUBLIC",
+          trades: describe(desiredFills(trades)),
+        });
+      }
+      continue;
+    }
+    if (managed.deletedAt) continue;
     if (managed.source !== "AIRTABLE_IMPORT") continue;
 
     const stored: StoredFill[] = managed.executions.flatMap((e) =>
@@ -432,6 +477,7 @@ export function summariseSync(r: SyncReport) {
     pubCode: r.pubCode,
     dryRun: r.dryRun,
     created: r.created,
+    toCreate: r.toCreate,
     rebuilt: r.rebuilt.length,
     unchanged: r.unchanged,
     changes: r.rebuilt,

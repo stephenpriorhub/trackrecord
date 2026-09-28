@@ -93,6 +93,19 @@ check("an already-synced position is left unchanged", () => {
   assert.equal(planPosition([leg], stored, dxyz, false).kind, "unchanged");
 });
 
+check("a legacy 1-unit import that matches in shape is NOT rewritten", () => {
+  const whole = desiredFills([open("a", "DXYZ", 26.4, "2026-03-11")]);
+  const stored = [{ legId: "leg1", intent: "OPEN", quantity: 1, price: "26.4", executedAt: new Date("2026-03-11") }];
+  assert.equal(planPosition([leg], stored, whole, false).kind, "unchanged");
+});
+
+check("...but a legacy import missing a partial exit still is", () => {
+  const stored = [
+    { legId: "leg1", intent: "OPEN", quantity: 1, price: "26.4", executedAt: new Date("2026-03-11") },
+  ];
+  assert.equal(planPosition([leg], stored, dxyz, false).kind, "rebuild");
+});
+
 check("hub edits are never overwritten", () => {
   const p = planPosition([leg], [], dxyz, true);
   assert.equal(p.kind, "conflict");

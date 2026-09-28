@@ -30,7 +30,8 @@ export default function AirtableSyncPanel({
   }
 
   const s = result?.ok ? result.summary : null;
-  const nothingToDo = s && s.rebuilt === 0 && s.created === 0;
+  const adds = s?.toCreate.length ?? 0;
+  const nothingToDo = s && s.rebuilt === 0 && s.created === 0 && adds === 0;
 
   return (
     <section className="rounded-xl border border-gray-800 bg-gray-900 p-5">
@@ -60,7 +61,7 @@ export default function AirtableSyncPanel({
               disabled={pending}
               className="rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-500 disabled:opacity-50"
             >
-              {pending ? "Syncing…" : `Apply ${s.rebuilt} change${s.rebuilt === 1 ? "" : "s"}`}
+              {pending ? "Syncing…" : `Apply ${adds + s.rebuilt} change${adds + s.rebuilt === 1 ? "" : "s"}`}
             </button>
           )}
         </div>
@@ -78,9 +79,41 @@ export default function AirtableSyncPanel({
             {applied
               ? `Synced: ${s.created} new position${s.created === 1 ? "" : "s"}, ${s.rebuilt} updated, ${s.unchanged} already current.`
               : nothingToDo
-                ? `Everything matches Airtable (${s.unchanged} positions checked). New Airtable positions, if any, are added when you apply.`
-                : `${s.rebuilt} position${s.rebuilt === 1 ? "" : "s"} would change; ${s.unchanged} already match. New Airtable positions are added on apply.`}
+                ? `Everything matches Airtable (${s.unchanged} positions checked).`
+                : `${adds} to add, ${s.rebuilt} to update, ${s.unchanged} already match.`}
           </p>
+
+          {!applied && s.toCreate.length > 0 && (
+            <div className="max-h-96 overflow-auto rounded-lg border border-gray-800">
+              <table className="w-full text-xs">
+                <thead className="sticky top-0 bg-gray-900 text-left text-gray-500">
+                  <tr>
+                    <th className="p-2">New position</th>
+                    <th className="p-2">Goes into</th>
+                    <th className="p-2">Trades</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {s.toCreate.map((c) => (
+                    <tr key={c.position} className="border-t border-gray-800 align-top">
+                      <td className="p-2 font-medium text-gray-200">{c.position}</td>
+                      <td className="p-2 text-gray-300">
+                        {c.portfolio}
+                        {c.newPortfolio ? (
+                          <span className="block text-yellow-400">
+                            new portfolio — starts private, not on any embed until published
+                          </span>
+                        ) : !c.publicPortfolio ? (
+                          <span className="block text-yellow-400">private — not on embeds</span>
+                        ) : null}
+                      </td>
+                      <td className="p-2 text-gray-400">{c.trades}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
 
           {s.changes.length > 0 && (
             <div className="max-h-96 overflow-auto rounded-lg border border-gray-800">
