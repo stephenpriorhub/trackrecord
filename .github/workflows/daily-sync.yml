@@ -86,10 +86,23 @@ jobs:
               -X POST "${BASE_URL}/api/managed-sync?${QS}" \
               -H "x-sync-key: ${SYNC_API_KEY}" \
               --max-time 280)
-            echo "${PUB} (${HTTP_CODE}):"
-            cat /tmp/managed_resp.txt; echo
+            cp /tmp/managed_resp.txt "managed-sync-${PUB}.json"
+            # A publication's full report can be megabytes (thousands of
+            # positions); GitHub drops a log line that long, so print counts
+            # and keep the whole report as an artifact.
+            SUMMARY=$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print({k:(len(v) if isinstance(v,list) else v) for k,v in d.items()})' "managed-sync-${PUB}.json" 2>/dev/null || head -c 500 /tmp/managed_resp.txt)
+            echo "${PUB} (${HTTP_CODE}): ${SUMMARY}"
             if [ "${HTTP_CODE}" != "${OK}" ]; then
               echo "::error::Portfolio Manager sync for ${PUB} failed with HTTP ${HTTP_CODE}"
               exit 1
             fi
           done
+
+      - name: Keep the Portfolio Manager reports
+        if: ${{ always() && (github.event_name == 'workflow_dispatch' || (vars.MANAGED_SYNC_ENABLED == 'true' && github.event.schedule == '0 22 * * *')) }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: managed-sync-reports
+          path: managed-sync-*.json
+          if-no-files-found: ignore
+          retention-days: 14
