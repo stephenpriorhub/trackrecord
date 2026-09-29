@@ -411,6 +411,28 @@ export async function syncPublicationFromAirtable(
     for (const e of imported.errors) report.errors.push(e);
   }
 
+  // ONE query for every Airtable-sourced position in the publication, fills
+  // and all. Looking each up separately was ~3,500 round trips for the War
+  // Room — minutes per run, long enough for the hub button to time out.
+  const loaded = await prisma.managedPosition.findMany({
+    where: {
+      deletedAt: null,
+      source: "AIRTABLE_IMPORT",
+      portfolio: { service: { pubCode } },
+    },
+    include: {
+      legs: { orderBy: { legIndex: "asc" } },
+      executions: {
+        where: { deletedAt: null },
+        include: { fills: { where: { deletedAt: null } } },
+      },
+    },
+  });
+  const byId = new Map(loaded.map((m) => [m.id, m]));
+  const byAirtableId = new Map(
+    loaded.filter((m) => m.airtableId).map((m) => [m.airtableId!, m]),
+  );
+
   for (const pos of positions) {
     const label = String(pos.fields["Position Name"] ?? pos.id);
     const trades = tradesByPosition.get(pos.id) ?? [];
@@ -418,16 +440,7 @@ export async function syncPublicationFromAirtable(
 
     // A dry run has not re-linked adopted positions yet, so find them by id.
     const adoptedId = dryRun ? adoptions.get(pos.id) : undefined;
-    const managed = await prisma.managedPosition.findUnique({
-      where: adoptedId ? { id: adoptedId } : { airtableId: pos.id },
-      include: {
-        legs: { orderBy: { legIndex: "asc" } },
-        executions: {
-          where: { deletedAt: null },
-          include: { fills: { where: { deletedAt: null } } },
-        },
-      },
-    });
+    const managed = adoptedId ? byId.get(adoptedId) : byAirtableId.get(pos.id);
     if (!managed) {
       // Only reachable on a dry run (apply imports first). Say where it would
       // land, because a NEW portfolio starts private and would not appear on

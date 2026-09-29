@@ -26,12 +26,7 @@ import { BENCHMARKS } from "@/lib/publications";
 import { createPosition, closePosition, type LegInput } from "@/lib/managed/positions";
 import { parseDecimal, type D } from "@/lib/money";
 import { newEmbedCode, parseTarget, targetBelongsTo } from "@/lib/managed/saved-embeds";
-import {
-  recordSync,
-  summariseSync,
-  syncPublicationFromAirtable,
-  type SyncSummary,
-} from "@/lib/managed/airtable-sync";
+import { getSyncJob, startSyncJob, type SyncJob } from "@/lib/managed/sync-jobs";
 
 export type ActionResult = { ok: true; message?: string } | { ok: false; error: string };
 
@@ -794,49 +789,60 @@ export async function setManualPriceAction(form: FormData): Promise<ActionResult
 // ------------------------------------------------------------ airtable sync
 
 export type AirtableSyncResult =
-  | { ok: true; summary: SyncSummary }
+  | { ok: true; job: SyncJob | null }
   | { ok: false; error: string };
 
+/** Resolve and authorise a publication for syncing. Whole-publication rights. */
+async function syncablePub(serviceId: string): Promise<{ pubCode: string; slug: string } | string> {
+  const { scope } = await actor();
+  if (!serviceId) return "No publication given.";
+  if (!(await canManageService(scope, serviceId))) {
+    return "You need rights to the whole publication to sync it.";
+  }
+  const service = await prisma.service.findUnique({
+    where: { id: serviceId },
+    select: { pubCode: true, slug: true },
+  });
+  if (!service) return "Publication not found.";
+  return service;
+}
+
 /**
- * Preview (dryRun) or apply the Airtable -> Portfolio Manager pull for one
- * publication. Whole-publication rights only: it can rewrite any of the
- * service's Airtable-sourced positions, so a guru assigned one portfolio must
- * not be able to run it. What it never touches is in airtable-sync.ts.
+ * Start a preview (apply=false) or a sync (apply=true) in the background.
+ * Returns straight away; the page polls airtableSyncStatusAction. It can
+ * rewrite any of the publication's Airtable-sourced positions, so a guru
+ * assigned one portfolio must not be able to run it.
  */
 export async function airtableSyncAction(
   serviceId: string,
   apply: boolean,
 ): Promise<AirtableSyncResult> {
   const { scope } = await actor();
-  if (!serviceId) return { ok: false, error: "No publication given." };
   if (!(await canManageService(scope, serviceId))) {
     return { ok: false, error: "You need rights to the whole publication to sync it." };
   }
-  const service = await prisma.service.findUnique({
-    where: { id: serviceId },
-    select: { pubCode: true, slug: true },
-  });
-  if (!service) return { ok: false, error: "Publication not found." };
-  // Same rule as the page: only publications already fed from Airtable. A
-  // sheet-fed one would import a duplicate partial open book.
-  const fed = await prisma.managedPosition.count({
-    where: { source: "AIRTABLE_IMPORT", deletedAt: null, portfolio: { serviceId } },
-  });
-  if (fed === 0) {
-    return { ok: false, error: "This publication is not maintained from Airtable." };
-  }
-
-  try {
-    const report = await syncPublicationFromAirtable(service.pubCode, { dryRun: !apply });
-    if (apply) {
-      await recordSync(report);
-      revalidatePath(`/publication/${service.slug}`);
+  const pub = await syncablePub(serviceId);
+  if (typeof pub === "string") return { ok: false, error: pub };
+  const job = startSyncJob(pub.pubCode, apply, () => {
+    try {
+      revalidatePath(`/publication/${pub.slug}`);
       revalidatePath("/");
+    } catch {
+      // Outside a request there may be nothing to revalidate; the page reloads anyway.
     }
-    return { ok: true, summary: summariseSync(report) };
-  } catch (err) {
-    return { ok: false, error: err instanceof Error ? err.message : String(err) };
+  });
+  return { ok: true, job };
+}
+
+/** The current or last sync for a publication. Same rights as starting one. */
+export async function airtableSyncStatusAction(serviceId: string): Promise<AirtableSyncResult> {
+  const { scope } = await actor();
+  if (!(await canManageService(scope, serviceId))) {
+    return { ok: false, error: "You need rights to the whole publication to sync it." };
   }
+  const pub = await syncablePub(serviceId);
+  if (typeof pub === "string") return { ok: false, error: pub };
+  return { ok: true, job: getSyncJob(pub.pubCode) };
 }
 
 // ------------------------------------------------------------ saved embeds

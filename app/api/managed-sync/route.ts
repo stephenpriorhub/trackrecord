@@ -1,10 +1,7 @@
-import { NextRequest, NextResponse, after } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { resolvePubCode } from "@/lib/publications";
-import {
-  recordSync,
-  summariseSync,
-  syncPublicationFromAirtable,
-} from "@/lib/managed/airtable-sync";
+import { summariseSync, syncPublicationFromAirtable } from "@/lib/managed/airtable-sync";
+import { startSyncJob } from "@/lib/managed/sync-jobs";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -41,10 +38,11 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  after(async () => {
-    const report = await syncPublicationFromAirtable(pubCode, { dryRun: false });
-    console.log("[managed-sync]", JSON.stringify(summariseSync(report)));
-    await recordSync(report);
-  });
+  // Through the shared runner, so a scheduled run and a hub click can never
+  // apply the same publication at the same time.
+  const job = startSyncJob(pubCode, true);
+  if (job.startedAt < new Date(Date.now() - 2000).toISOString()) {
+    return NextResponse.json({ message: "Already running", pubCode, startedAt: job.startedAt }, { status: 202 });
+  }
   return NextResponse.json({ message: "Sync started", pubCode }, { status: 202 });
 }
