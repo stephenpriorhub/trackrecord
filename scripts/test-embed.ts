@@ -140,6 +140,14 @@ check("column, total and exclude options parse", () => {
   assert.equal(d.total, true);
 });
 
+check("order and sort options parse", () => {
+  assert.equal(parseEmbedOptions({}).order, "default");
+  assert.equal(parseEmbedOptions({ order: "outperformance" }).order, "outperformance");
+  assert.equal(parseEmbedOptions({ order: "junk" }).order, "default");
+  assert.equal(parseEmbedOptions({}).sortable, true);
+  assert.equal(parseEmbedOptions({ sort: "0" }).sortable, false);
+});
+
 check("legacy hide= still parses for live iframes", () => {
   assert.deepEqual(parseEmbedOptions({ hide: "a, b" }).hide, ["a", "b"]);
 });

@@ -25,6 +25,7 @@ import { createPortfolio, ensureService } from "@/lib/managed/portfolios";
 import { BENCHMARKS } from "@/lib/publications";
 import { createPosition, closePosition, type LegInput } from "@/lib/managed/positions";
 import { parseDecimal, type D } from "@/lib/money";
+import { newEmbedCode, parseTarget, targetBelongsTo } from "@/lib/managed/saved-embeds";
 import {
   recordSync,
   summariseSync,
@@ -836,4 +837,90 @@ export async function airtableSyncAction(
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : String(err) };
   }
+}
+
+// ------------------------------------------------------------ saved embeds
+
+export type SavedEmbedResult =
+  | { ok: true; id: string; code: string }
+  | { ok: false; error: string };
+
+/**
+ * Create or update a saved embed. Whole-publication rights, because a saved
+ * embed can show any of the publication's books and editing one changes every
+ * page it is pasted into.
+ */
+export async function saveEmbedAction(input: {
+  id?: string;
+  name: string;
+  serviceId: string;
+  target: string;
+  query: string;
+}): Promise<SavedEmbedResult> {
+  const { user, scope } = await actor();
+  const name = input.name.trim().slice(0, 120);
+  if (!name) return { ok: false, error: "Give the embed a name." };
+  if (!(await canManageService(scope, input.serviceId))) {
+    return { ok: false, error: "You need rights to the whole publication to save embeds." };
+  }
+  const target = parseTarget(input.target);
+  if (!target || !(await targetBelongsTo(target, input.serviceId))) {
+    return { ok: false, error: "That embed does not belong to this publication." };
+  }
+  // The query is re-validated on every render by parseEmbedOptions; here it
+  // only has to be a query string of reasonable size.
+  const query = input.query.replace(/^\?/, "").slice(0, 2000);
+  const email = user?.email ?? null;
+
+  if (input.id) {
+    const existing = await prisma.savedEmbed.findUnique({ where: { id: input.id } });
+    if (!existing || existing.deletedAt) return { ok: false, error: "Saved embed not found." };
+    // Rights are checked against the row's own publication too, so an id
+    // from another publication cannot be edited through this one.
+    if (!(await canManageService(scope, existing.serviceId)) || existing.serviceId !== input.serviceId) {
+      return { ok: false, error: "You cannot edit that saved embed." };
+    }
+    const updated = await prisma.savedEmbed.update({
+      where: { id: existing.id },
+      data: { name, target: input.target, query, updatedByEmail: email },
+    });
+    revalidatePath("/embeds");
+    return { ok: true, id: updated.id, code: updated.code };
+  }
+
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    try {
+      const created = await prisma.savedEmbed.create({
+        data: {
+          code: newEmbedCode(),
+          name,
+          serviceId: input.serviceId,
+          target: input.target,
+          query,
+          createdByEmail: email,
+          updatedByEmail: email,
+        },
+      });
+      revalidatePath("/embeds");
+      return { ok: true, id: created.id, code: created.code };
+    } catch (err) {
+      // A code collision is astronomically rare; retry with a fresh one.
+      if ((err as { code?: string }).code !== "P2002") throw err;
+    }
+  }
+  return { ok: false, error: "Could not create a unique link. Try again." };
+}
+
+/** Soft-delete a saved embed; its link then 404s like an unknown code. */
+export async function deleteSavedEmbedAction(id: string): Promise<ActionResult> {
+  const { user, scope } = await actor();
+  const existing = await prisma.savedEmbed.findUnique({ where: { id } });
+  if (!existing || existing.deletedAt) return { ok: false, error: "Saved embed not found." };
+  if (!(await canManageService(scope, existing.serviceId))) return DENIED;
+  await prisma.savedEmbed.update({
+    where: { id },
+    data: { deletedAt: new Date(), updatedByEmail: user?.email ?? null },
+  });
+  revalidatePath("/embeds");
+  return { ok: true, message: "Deleted." };
 }

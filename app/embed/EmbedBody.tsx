@@ -123,6 +123,7 @@ export default function EmbedBody({ view }: { view: EmbedView }) {
       {/* Report our height so a host page can size the iframe without a scrollbar. */}
       <script dangerouslySetInnerHTML={{ __html: RESIZE }} />
       {options.tabs && <script dangerouslySetInnerHTML={{ __html: TABS }} />}
+      {options.sortable && <script dangerouslySetInnerHTML={{ __html: SORT }} />}
     </>
   );
 }
@@ -310,7 +311,13 @@ function Section({
           <thead>
             <tr>
               {cols.map((c) => (
-                <th key={c.key}>{c.label}</th>
+                <th
+                  key={c.key}
+                  data-sortable={options.sortable && c.sortValue ? "1" : undefined}
+                  aria-sort={options.sortable && c.sortValue ? "none" : undefined}
+                >
+                  {c.label}
+                </th>
               ))}
             </tr>
           </thead>
@@ -321,6 +328,7 @@ function Section({
                   <td
                     key={c.key}
                     data-label={c.label}
+                    data-v={sortAttr(c, r)}
                     className={typeof c.className === "function" ? c.className(r) : c.className}
                   >
                     {c.cell(r)}
@@ -335,10 +343,18 @@ function Section({
   );
 }
 
+function sortAttr(c: Column, r: EmbedRow): string | undefined {
+  if (!c.sortValue) return undefined;
+  const v = c.sortValue(r);
+  return v === null ? "" : String(v);
+}
+
 interface Column {
   key: string;
   label: string;
   cell: (r: EmbedRow) => React.ReactNode;
+  /** What a click-to-sort orders by. Numbers sort numerically; null sorts last. */
+  sortValue?: (r: EmbedRow) => number | string | null;
   className?: string | ((r: EmbedRow) => string);
 }
 
@@ -349,6 +365,8 @@ interface Column {
  * leave the header and the body out of step. Stock is never optional: a row
  * with no ticker is not a position anyone can read.
  */
+const n = (v: D | null): number | null => (v === null ? null : Number(v.toString()));
+
 function columnsFor(kind: "open" | "closed", options: EmbedOptions): Column[] {
   const on = (key: string) => !options.hideColumns.includes(key);
   const money = (v: D | null) => <Money v={v} />;
@@ -356,41 +374,44 @@ function columnsFor(kind: "open" | "closed", options: EmbedOptions): Column[] {
     key: "company",
     label: "Underlying Company",
     cell: (r) => r.companyName ?? "—",
+    sortValue: (r) => r.companyName,
   };
   const all: (Column | false)[] =
     kind === "open"
       ? [
-          on("added") && { key: "added", label: "Date Added", cell: (r) => day(r.openedAt) },
-          { key: "stock", label: "Stock", className: "sym", cell: (r) => `$${r.ticker}` },
+          on("added") && { key: "added", label: "Date Added", cell: (r) => day(r.openedAt), sortValue: (r) => r.openedAt.getTime() },
+          { key: "stock", label: "Stock", className: "sym", cell: (r) => `$${r.ticker}`, sortValue: (r) => r.ticker },
           // Only a merged service embed carries this column; on a single book
           // every row would answer the same, which is just noise.
-          options.portfolioColumn && { key: "portfolio", label: "Portfolio", className: "book", cell: (r) => r.portfolioName },
-          on("entry") && { key: "entry", label: "Entry Price", cell: (r) => money(r.entryPrice) },
+          options.portfolioColumn && { key: "portfolio", label: "Portfolio", className: "book", cell: (r) => r.portfolioName, sortValue: (r) => r.portfolioName },
+          on("entry") && { key: "entry", label: "Entry Price", cell: (r) => money(r.entryPrice), sortValue: (r) => n(r.entryPrice) },
           on("company") && company,
           on("current") && {
             key: "current",
             label: "Current Price",
             cell: (r) => (r.unpriced ? <span className="dim">—</span> : money(r.currentPrice)),
+            sortValue: (r) => (r.unpriced ? null : n(r.currentPrice)),
           },
-          options.returns && { key: "return", label: "% Change", cell: (r) => <Pct v={r.returnPct} /> },
+          options.returns && { key: "return", label: "% Change", cell: (r) => <Pct v={r.returnPct} />, sortValue: (r) => n(r.returnPct) },
           options.returns && on("weight") && weightColumn,
-          on("buyupto") && { key: "buyupto", label: "Buy Up To Price", cell: (r) => money(r.buyUpTo) },
-          on("stop") && { key: "stop", label: "Stop-Loss", cell: (r) => money(r.stopLoss) },
+          on("buyupto") && { key: "buyupto", label: "Buy Up To Price", cell: (r) => money(r.buyUpTo), sortValue: (r) => n(r.buyUpTo) },
+          on("stop") && { key: "stop", label: "Stop-Loss", cell: (r) => money(r.stopLoss), sortValue: (r) => n(r.stopLoss) },
           options.comments && commentColumn,
         ]
       : [
-          on("added") && { key: "added", label: "Date Added", cell: (r) => day(r.openedAt) },
-          on("closed") && { key: "closed", label: "Date Closed", cell: (r) => day(r.closedAt) },
-          { key: "stock", label: "Stock", className: "sym", cell: (r) => `$${r.ticker}` },
-          options.portfolioColumn && { key: "portfolio", label: "Portfolio", className: "book", cell: (r) => r.portfolioName },
-          on("entry") && { key: "entry", label: "Entry Price", cell: (r) => money(r.entryPrice) },
-          on("current") && { key: "current", label: "Closed Price", cell: (r) => money(r.currentPrice) },
-          options.returns && { key: "return", label: "Gain or Loss %", cell: (r) => <Pct v={r.returnPct} /> },
+          on("added") && { key: "added", label: "Date Added", cell: (r) => day(r.openedAt), sortValue: (r) => r.openedAt.getTime() },
+          on("closed") && { key: "closed", label: "Date Closed", cell: (r) => day(r.closedAt), sortValue: (r) => r.closedAt?.getTime() ?? null },
+          { key: "stock", label: "Stock", className: "sym", cell: (r) => `$${r.ticker}`, sortValue: (r) => r.ticker },
+          options.portfolioColumn && { key: "portfolio", label: "Portfolio", className: "book", cell: (r) => r.portfolioName, sortValue: (r) => r.portfolioName },
+          on("entry") && { key: "entry", label: "Entry Price", cell: (r) => money(r.entryPrice), sortValue: (r) => n(r.entryPrice) },
+          on("current") && { key: "current", label: "Closed Price", cell: (r) => money(r.currentPrice), sortValue: (r) => n(r.currentPrice) },
+          options.returns && { key: "return", label: "Gain or Loss %", cell: (r) => <Pct v={r.returnPct} />, sortValue: (r) => n(r.returnPct) },
           options.returns && on("weight") && weightColumn,
           on("held") && {
             key: "held",
             label: "Time Held",
             cell: (r) => (r.daysHeld === null ? "—" : `${r.daysHeld}d`),
+            sortValue: (r) => r.daysHeld,
           },
           on("company") && company,
           options.comments && commentColumn,
@@ -408,6 +429,7 @@ const weightColumn: Column = {
   key: "weight",
   label: "Weight",
   className: "wt",
+  sortValue: (r) => r.weight,
   cell: (r) =>
     r.weight === null ? (
       <span className="dim">—</span>
@@ -499,6 +521,12 @@ h3.pf-title { font-size: 16px; margin-bottom: 12px; }
 .pf th { text-align: center; font-weight: 700; color: var(--pf-text); padding: 8px 10px;
          border-bottom: 1px solid var(--pf-line); white-space: nowrap; }
 .pf th:first-child, .pf td:first-child { text-align: left; }
+.pf th[data-sortable] { cursor: pointer; user-select: none; }
+.pf th[data-sortable]:hover { color: var(--pf-strong); }
+.pf th[data-sortable]::after { content: " ↕"; color: var(--pf-dim); font-weight: 400; }
+.pf th[aria-sort="ascending"]::after { content: " ↑"; color: var(--pf-accent, var(--pf-strong)); }
+.pf th[aria-sort="descending"]::after { content: " ↓"; color: var(--pf-accent, var(--pf-strong)); }
+.pf th[data-sortable]:focus-visible { outline: 2px solid var(--pf-accent, #2563eb); outline-offset: -2px; }
 .pf td { text-align: center; padding: var(--pf-cell); border-bottom: 1px solid var(--pf-line2); color: var(--pf-text); }
 .pf tbody tr:last-child td { border-bottom: none; }
 .pf .sym { font-weight: 700; color: var(--pf-accent, var(--pf-strong)); }
@@ -576,6 +604,45 @@ const TABS = `
     });
   });
   if (tabs.length) select(tabs[0]);
+})();
+`;
+
+/**
+ * Click a column header to sort that table; click again to reverse. Each table
+ * sorts on its own. Values come from data-v, so "$1,234.00" and "+12.30%" sort
+ * as numbers and a blank ("—") always goes last in either direction. Without
+ * JavaScript the tables simply keep their newest-first order.
+ */
+const SORT = `
+(function () {
+  document.querySelectorAll(".pf table").forEach(function (table) {
+    var heads = table.querySelectorAll("th[data-sortable]");
+    heads.forEach(function (th) {
+      var col = Array.prototype.indexOf.call(th.parentNode.children, th);
+      th.tabIndex = 0;
+      function sort() {
+        var dir = th.getAttribute("aria-sort") === "descending" ? 1 : -1;
+        heads.forEach(function (h) { h.setAttribute("aria-sort", "none"); });
+        th.setAttribute("aria-sort", dir === 1 ? "ascending" : "descending");
+        var body = table.tBodies[0];
+        var rows = Array.prototype.slice.call(body.rows);
+        rows.sort(function (a, b) {
+          var x = a.cells[col].getAttribute("data-v"), y = b.cells[col].getAttribute("data-v");
+          if (x === "" && y === "") return 0;
+          if (x === "") return 1;
+          if (y === "") return -1;
+          var nx = Number(x), ny = Number(y);
+          var c = !isNaN(nx) && !isNaN(ny) ? nx - ny : x.localeCompare(y);
+          return c * dir;
+        });
+        rows.forEach(function (r) { body.appendChild(r); });
+      }
+      th.addEventListener("click", sort);
+      th.addEventListener("keydown", function (e) {
+        if (e.key === "Enter" || e.key === " ") { e.preventDefault(); sort(); }
+      });
+    });
+  });
 })();
 `;
 

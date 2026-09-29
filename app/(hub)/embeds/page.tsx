@@ -1,8 +1,8 @@
 import { prisma } from "@/lib/prisma";
 import { getManageContext } from "@/lib/manage-context";
-import { canManageAnything, portfolioScopeFilter } from "@/lib/authz";
+import { canManageAnything, canManageService, portfolioScopeFilter } from "@/lib/authz";
 import NoManageAccess from "../NoManageAccess";
-import EmbedBuilder, { type EmbedService } from "../EmbedBuilder";
+import EmbedBuilder, { type EmbedService, type SavedEmbedRow } from "../EmbedBuilder";
 
 export const dynamic = "force-dynamic";
 
@@ -18,7 +18,7 @@ export const dynamic = "force-dynamic";
 export default async function EmbedsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ service?: string; portfolio?: string }>;
+  searchParams: Promise<{ service?: string; portfolio?: string; saved?: string }>;
 }) {
   const { user, scope } = await getManageContext();
   if (!canManageAnything(scope)) return <NoManageAccess user={user} />;
@@ -50,6 +50,7 @@ export default async function EmbedsPage({
   const options: EmbedService[] = services
     .filter((s) => s.portfolios.length > 0)
     .map((s) => ({
+      id: s.id,
       slug: s.slug,
       name: s.name,
       books: s.portfolios.map((p) => ({
@@ -61,6 +62,29 @@ export default async function EmbedsPage({
     }));
 
   const origin = process.env.NEXT_PUBLIC_APP_ORIGIN ?? "https://trackrecord.oxfordhub.app";
+
+  // Saved embeds for publications this person manages outright. A guru with
+  // one portfolio sees none: a saved embed can span the whole publication.
+  const manageable: string[] = [];
+  for (const s of services) {
+    if (await canManageService(scope, s.id)) manageable.push(s.id);
+  }
+  const saved = await prisma.savedEmbed.findMany({
+    where: { deletedAt: null, serviceId: { in: manageable } },
+    orderBy: { updatedAt: "desc" },
+    include: { service: { select: { slug: true } } },
+  });
+  const savedList: SavedEmbedRow[] = saved.map((r) => ({
+    id: r.id,
+    code: r.code,
+    name: r.name,
+    serviceSlug: r.service.slug,
+    target: r.target,
+    query: r.query,
+    updatedAt: r.updatedAt.toISOString(),
+    updatedBy: r.updatedByEmail,
+  }));
+  const editing = sp.saved ? savedList.find((r) => r.id === sp.saved) : undefined;
 
   return (
     <div className="space-y-6">
@@ -78,7 +102,11 @@ export default async function EmbedsPage({
       ) : (
         <section className="rounded-xl border border-gray-800 bg-gray-900 p-5">
           <EmbedBuilder
+            // Remount when switching saved embeds so every control re-seeds.
+            key={editing?.id ?? "new"}
             origin={origin}
+            editing={editing}
+            savedList={savedList}
             services={options}
             initialService={sp.service}
             initialTarget={sp.portfolio}

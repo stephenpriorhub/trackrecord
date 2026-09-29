@@ -220,6 +220,7 @@ model Service {
   gurus       ServiceGuru[]
   portfolios  ManagedPortfolio[]
   assignments PortfolioAssignment[]
+  savedEmbeds SavedEmbed[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -266,7 +267,7 @@ model ManagedPortfolio {
   /// measured from its own entry, so a holding added later contributes only the
   /// gain it actually earned — setting an earlier start date can never
   /// retroactively credit it with the index's head start.
-  startDate       DateTime? @db.Date
+  startDate DateTime? @db.Date
 
   /// Set when this portfolio was seeded from an Airtable Trade Group, so a
   /// re-run of the import updates rather than duplicates.
@@ -285,10 +286,10 @@ model ManagedPortfolio {
   /// source can be disconnected at any time and the positions simply stay as
   /// they are — which is the point: this app is meant to outlive the
   /// spreadsheets it is currently fed by.
-  syncedAt      DateTime?
+  syncedAt DateTime?
   /// What the last sync run reported, for the settings panel. Null before the
   /// first run.
-  syncNote      String?
+  syncNote String?
 
   positions   ManagedPosition[]
   assignments PortfolioAssignment[]
@@ -352,15 +353,15 @@ model ManagedPosition {
   guruId String?
   guru   Guru?   @relation(fields: [guruId], references: [id], onDelete: SetNull)
 
-  source     ManagedSource @default(MANUAL)
+  source      ManagedSource @default(MANUAL)
   /// Airtable Position record id, for import idempotency. Nothing is ever
   /// written back to Airtable.
-  airtableId String?       @unique
+  airtableId  String?       @unique
   /// Stable key for an import that is not Airtable's — currently the published
   /// track-record sheets. Separate from airtableId because the two name records
   /// in different systems, and re-running either import must not create a
   /// second copy of the same trade.
-  externalKey String?      @unique
+  externalKey String?       @unique
 
   legs       ManagedLeg[]
   executions ManagedExecution[]
@@ -645,4 +646,34 @@ model ChangeLog {
   @@index([portfolioId, createdAt(sort: Desc)])
   @@index([entity, entityId])
   @@index([createdAt(sort: Desc)])
+}
+
+/// A named embed configuration with a permanent public link, /embed/e/<code>.
+///
+/// The point is that it can be ADJUSTED after it has been pasted into pages:
+/// the iframe carries only the code, and the options live here, so editing a
+/// saved embed changes every page that uses it with no re-pasting.
+///
+/// `target` is "s/<service slug>" or "p/<portfolio slug>" — the same path the
+/// plain embed routes use — and `query` is their query string without "?".
+/// Options are re-parsed on every render by parseEmbedOptions, so nothing here
+/// can bypass visibility or reach CSS unvalidated.
+model SavedEmbed {
+  id        String  @id @default(cuid())
+  /// The public code in /embed/e/<code>. Short, random, set once.
+  code      String  @unique
+  name      String
+  serviceId String
+  service   Service @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+  target    String
+  query     String  @default("")
+
+  createdByEmail String?
+  updatedByEmail String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  /// Soft delete: the link then 404s like an unknown code.
+  deletedAt      DateTime?
+
+  @@index([serviceId, deletedAt])
 }

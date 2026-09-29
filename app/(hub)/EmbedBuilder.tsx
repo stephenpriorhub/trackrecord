@@ -20,7 +20,9 @@
  * added next month appears on every page that already embeds it. A single
  * sub-portfolio is simply that portfolio's own embed URL.
  */
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
+import { deleteSavedEmbedAction, saveEmbedAction } from "./actions";
 
 type Show = "both" | "open" | "closed";
 type Summary = "benchmark" | "portfolio" | "none";
@@ -60,9 +62,21 @@ export interface EmbedBook {
 }
 
 export interface EmbedService {
+  id: string;
   slug: string;
   name: string;
   books: EmbedBook[];
+}
+
+export interface SavedEmbedRow {
+  id: string;
+  code: string;
+  name: string;
+  serviceSlug: string;
+  target: string;
+  query: string;
+  updatedAt: string;
+  updatedBy: string | null;
 }
 
 export default function EmbedBuilder({
@@ -70,6 +84,8 @@ export default function EmbedBuilder({
   services,
   initialService,
   initialTarget,
+  editing,
+  savedList = [],
 }: {
   origin: string;
   /** Publications this person may manage, each with the portfolios they may see. */
@@ -77,12 +93,27 @@ export default function EmbedBuilder({
   initialService?: string;
   /** A portfolio slug to open on alone, or omitted for the entire publication. */
   initialTarget?: string;
+  /** A saved embed to open for editing; its settings seed every control. */
+  editing?: SavedEmbedRow;
+  /** Saved embeds this person may manage. */
+  savedList?: SavedEmbedRow[];
 }) {
+  // A saved embed's stored query string seeds the controls. The builder only
+  // ever writes non-default values, so an absent key means the default —
+  // except layout, where absent means the original merged table.
+  const q = new URLSearchParams(editing?.query ?? "");
+  const g = (k: string) => q.get(k);
+  const list = (k: string) => (g(k) ? g(k)!.split(",").filter(Boolean) : []);
+  const savedTarget = editing?.target.split("/") ?? null;
+  const savedBg = g("bg");
+
   // ---- what ----
   const [serviceSlug, setServiceSlug] = useState<string>(
-    services.some((sv) => sv.slug === initialService)
-      ? initialService!
-      : (services[0]?.slug ?? ""),
+    editing
+      ? editing.serviceSlug
+      : services.some((sv) => sv.slug === initialService)
+        ? initialService!
+        : (services[0]?.slug ?? ""),
   );
   const service = services.find((sv) => sv.slug === serviceSlug) ?? services[0];
   const books = service?.books ?? [];
@@ -90,33 +121,79 @@ export default function EmbedBuilder({
   // null = EVERY portfolio, including ones added later (no list in the URL).
   // A list = exactly these, in the publication's own display order.
   const [picked, setPicked] = useState<string[] | null>(
-    initialTarget && books.some((b) => b.slug === initialTarget) ? [initialTarget] : null,
+    savedTarget
+      ? savedTarget[0] === "p"
+        ? [savedTarget[1]]
+        : list("only").length
+          ? list("only")
+          : null
+      : initialTarget && books.some((b) => b.slug === initialTarget)
+        ? [initialTarget]
+        : null,
   );
-  const [layout, setLayout] = useState<Layout>("grouped");
-  const [tabs, setTabs] = useState(true);
-  const [allTab, setAllTab] = useState(true);
+  const [layout, setLayout] = useState<Layout>(
+    editing ? (g("layout") === "grouped" ? "grouped" : "merged") : "grouped",
+  );
+  const [tabs, setTabs] = useState(editing ? g("tabs") === "1" : true);
+  const [allTab, setAllTab] = useState(g("all") !== "0");
+  const [order, setOrder] = useState<"default" | "alpha" | "outperformance">(
+    g("order") === "alpha" || g("order") === "outperformance"
+      ? (g("order") as "alpha" | "outperformance")
+      : "default",
+  );
+  const [sortable, setSortable] = useState(g("sort") !== "0");
   // ---- content ----
-  const [show, setShow] = useState<Show>("both");
-  const [summary, setSummary] = useState<Summary>("benchmark");
-  const [returns, setReturns] = useState(true);
-  const [comments, setComments] = useState(true);
-  const [bookColumn, setBookColumn] = useState(true);
-  const [limit, setLimit] = useState(DEFAULT_LIMIT);
-  const [hiddenCols, setHiddenCols] = useState<string[]>([]);
+  const [show, setShow] = useState<Show>(
+    g("show") === "open" || g("show") === "closed" ? (g("show") as Show) : "both",
+  );
+  const [summary, setSummary] = useState<Summary>(
+    g("summary") === "portfolio" || g("summary") === "none" ? (g("summary") as Summary) : "benchmark",
+  );
+  const [returns, setReturns] = useState(g("returns") !== "0");
+  const [comments, setComments] = useState(g("comments") !== "0");
+  const [bookColumn, setBookColumn] = useState(g("portfolio") !== "0");
+  const [limit, setLimit] = useState(
+    g("limit") !== null ? Math.max(0, Number.parseInt(g("limit")!, 10) || 0) : DEFAULT_LIMIT,
+  );
+  const [hiddenCols, setHiddenCols] = useState<string[]>(list("hidecols"));
   // ---- publication total ----
-  const [showTotal, setShowTotal] = useState(true);
-  const [notInTotal, setNotInTotal] = useState<string[]>([]);
+  const [showTotal, setShowTotal] = useState(g("total") !== "0");
+  const [notInTotal, setNotInTotal] = useState<string[]>(list("exclude"));
   // ---- look ----
-  const [theme, setTheme] = useState<"light" | "dark">("light");
-  const [bg, setBg] = useState<Bg>("default");
-  const [bgColor, setBgColor] = useState("#f5f5f4");
-  const [cards, setCards] = useState(true);
-  const [accentOn, setAccentOn] = useState(false);
-  const [accent, setAccent] = useState("#1d4ed8");
-  const [font, setFont] = useState<"sans" | "serif">("sans");
-  const [density, setDensity] = useState<"comfortable" | "compact">("comfortable");
-  const [corners, setCorners] = useState<"rounded" | "square">("rounded");
-  const [title, setTitle] = useState(true);
+  const [theme, setTheme] = useState<"light" | "dark">(g("theme") === "dark" ? "dark" : "light");
+  const [bg, setBg] = useState<Bg>(
+    savedBg === "none"
+      ? "none"
+      : savedBg === "ffffff" || savedBg === "000000"
+        ? "white"
+        : savedBg
+          ? "custom"
+          : "default",
+  );
+  const [bgColor, setBgColor] = useState(
+    savedBg && savedBg !== "none" && savedBg !== "ffffff" && savedBg !== "000000"
+      ? `#${savedBg}`
+      : "#f5f5f4",
+  );
+  const [cards, setCards] = useState(g("cards") !== "0");
+  const [accentOn, setAccentOn] = useState(!!g("accent"));
+  const [accent, setAccent] = useState(g("accent") ? `#${g("accent")}` : "#1d4ed8");
+  const [font, setFont] = useState<"sans" | "serif">(g("font") === "serif" ? "serif" : "sans");
+  const [density, setDensity] = useState<"comfortable" | "compact">(
+    g("density") === "compact" ? "compact" : "comfortable",
+  );
+  const [corners, setCorners] = useState<"rounded" | "square">(
+    g("corners") === "square" ? "square" : "rounded",
+  );
+  const [title, setTitle] = useState(g("title") !== "0");
+  // ---- saving ----
+  const router = useRouter();
+  const [current, setCurrent] = useState<
+    { id: string; code: string; name: string; query: string; target: string } | null
+  >(editing ? { id: editing.id, code: editing.code, name: editing.name, query: editing.query, target: editing.target } : null);
+  const [saveName, setSaveName] = useState(editing?.name ?? "");
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [saving, startSave] = useTransition();
   // ---- snippet ----
   const [autoHeight, setAutoHeight] = useState(true);
   const [copied, setCopied] = useState(false);
@@ -146,7 +223,7 @@ export default function EmbedBuilder({
     setPicked(next.length === books.length ? null : next);
   }
 
-  const url = useMemo(() => {
+  const { url, query, target } = useMemo(() => {
     const p = new URLSearchParams();
     // Only non-default values go in, so the common case is a clean URL.
     if (whole) {
@@ -158,6 +235,7 @@ export default function EmbedBuilder({
       }
       if (layout === "merged" && !bookColumn) p.set("portfolio", "0");
       if (layout === "grouped" && !showTotal) p.set("total", "0");
+      if (layout === "grouped" && multi && order !== "default") p.set("order", order);
       // Only books actually in the embed; a stale slug would be meaningless.
       const excluded = notInTotal.filter((x) => selected.some((b) => b.slug === x));
       if (totalShown && excluded.length) p.set("exclude", excluded.join(","));
@@ -167,6 +245,7 @@ export default function EmbedBuilder({
     if (!returns) p.set("returns", "0");
     if (!comments) p.set("comments", "0");
     if (hiddenCols.length) p.set("hidecols", hiddenCols.join(","));
+    if (!sortable) p.set("sort", "0");
     if (limit !== DEFAULT_LIMIT) p.set("limit", String(limit));
     if (theme === "dark") p.set("theme", "dark");
     if (bg === "none") p.set("bg", "none");
@@ -180,10 +259,14 @@ export default function EmbedBuilder({
     if (!title) p.set("title", "0");
     const qs = p.toString();
     const path = whole || !chosen ? `s/${slug}` : `p/${chosen.slug}`;
-    return `${origin}/embed/${path}${qs ? `?${qs}` : ""}`;
+    return {
+      url: `${origin}/embed/${path}${qs ? `?${qs}` : ""}`,
+      query: qs,
+      target: path,
+    };
   }, [
     origin, slug, whole, chosen, multi, subset, selected, layout, tabs, allTab, bookColumn, show, summary,
-    showTotal, notInTotal, totalShown, hiddenCols,
+    showTotal, notInTotal, totalShown, hiddenCols, order, sortable,
     returns, comments, limit, theme, bg, bgColor, cards, accentOn, accent, font,
     density, corners, title,
   ]);
@@ -193,9 +276,35 @@ export default function EmbedBuilder({
   // part of the snippet.
   const previewUrl = url + (url.includes("?") ? "&" : "?") + "preview=1";
 
+  // A saved embed's link is what goes in the page, so later edits reach it.
+  const savedUrl = current ? `${origin}/embed/e/${current.code}` : null;
+  const dirty =
+    !!current &&
+    (current.query !== query || current.target !== target || current.name !== saveName.trim());
+
+  function save(asNew: boolean) {
+    setSaveError(null);
+    startSave(async () => {
+      const r = await saveEmbedAction({
+        id: asNew ? undefined : current?.id,
+        name: saveName,
+        serviceId: service?.id ?? "",
+        target,
+        query,
+      });
+      if (!r.ok) {
+        setSaveError(r.error);
+        return;
+      }
+      setCurrent({ id: r.id, code: r.code, name: saveName.trim(), query, target });
+      router.replace(`/embeds?saved=${r.id}`, { scroll: false });
+      router.refresh();
+    });
+  }
+
   const snippet = useMemo(() => {
     const transparent = bg === "none" ? ' allowtransparency="true"' : "";
-    const iframe = `<iframe data-mta-embed src="${url}" title="${whole ? "Track record" : "Portfolio"}" width="100%" height="600" style="border:0;width:100%;background:transparent"${transparent} loading="lazy"></iframe>`;
+    const iframe = `<iframe data-mta-embed src="${savedUrl ?? url}" title="${whole ? "Track record" : "Portfolio"}" width="100%" height="600" style="border:0;width:100%;background:transparent"${transparent} loading="lazy"></iframe>`;
     if (!autoHeight) return iframe;
     // The embed posts its height on load and whenever it reflows (including
     // when a reader switches portfolio in the dropdown). Matching on the
@@ -209,7 +318,7 @@ export default function EmbedBuilder({
     });
   });
 </script>`;
-  }, [url, autoHeight, whole, bg]);
+  }, [url, savedUrl, autoHeight, whole, bg]);
 
   async function copy() {
     try {
@@ -272,6 +381,20 @@ export default function EmbedBuilder({
                 </Choice>
                 <Choice active={layout === "merged"} onClick={() => setLayout("merged")}>
                   One combined table
+                </Choice>
+              </Group>
+            )}
+
+            {whole && layout === "grouped" && multi && (
+              <Group label="Portfolio order">
+                <Choice active={order === "default"} onClick={() => setOrder("default")}>
+                  As listed
+                </Choice>
+                <Choice active={order === "alpha"} onClick={() => setOrder("alpha")}>
+                  A–Z
+                </Choice>
+                <Choice active={order === "outperformance"} onClick={() => setOrder("outperformance")}>
+                  Best vs S&amp;P 500 first
                 </Choice>
               </Group>
             )}
@@ -450,6 +573,12 @@ export default function EmbedBuilder({
             })}
           </Group>
 
+          <Group label="Readers can">
+            <Choice active={sortable} onClick={() => setSortable(!sortable)}>
+              Sort by clicking a column
+            </Choice>
+          </Group>
+
           <Group label={whole && layout === "grouped" ? "Closed rows per portfolio" : "Closed rows"}>
             {[50, DEFAULT_LIMIT, 0].map((n) => (
               <Choice key={n} active={limit === n} onClick={() => setLimit(n)}>
@@ -533,6 +662,56 @@ export default function EmbedBuilder({
 
       <LivePreview src={previewUrl} />
 
+      <Panel title={current ? `Saved embed: ${current.name}` : "Save this embed"}>
+        <div className="flex flex-wrap items-center gap-2">
+          <input
+            type="text"
+            value={saveName}
+            onChange={(e) => setSaveName(e.target.value)}
+            placeholder="Name"
+            aria-label="Saved embed name"
+            className="min-w-64 flex-1 rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-gray-100"
+          />
+          {current ? (
+            <>
+              <button
+                type="button"
+                onClick={() => save(false)}
+                disabled={saving || !dirty || !saveName.trim()}
+                className="rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-500 disabled:opacity-40"
+              >
+                {saving ? "Saving…" : dirty ? "Save changes" : "Saved"}
+              </button>
+              <button
+                type="button"
+                onClick={() => save(true)}
+                disabled={saving || !saveName.trim()}
+                className="rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 text-sm font-medium text-gray-200 hover:bg-gray-700 disabled:opacity-40"
+              >
+                Save as new
+              </button>
+            </>
+          ) : (
+            <button
+              type="button"
+              onClick={() => save(true)}
+              disabled={saving || !saveName.trim()}
+              className="rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-500 disabled:opacity-40"
+            >
+              {saving ? "Saving…" : "Save embed"}
+            </button>
+          )}
+        </div>
+        {saveError && <p className="mt-2 text-xs text-red-400">{saveError}</p>}
+        <p className="mt-2 text-xs text-gray-600">
+          {current
+            ? dirty
+              ? "Unsaved changes — pages using this embed still show the last saved version until you save."
+              : "Pages using the code below update whenever you save changes here — no need to re-paste."
+            : "Saving gives this embed a permanent link. Paste it once; adjust it here any time and every page using it updates."}
+        </p>
+      </Panel>
+
       <div>
         <div className="mb-1 flex items-center justify-between">
           <span className="text-xs uppercase tracking-wide text-gray-500">
@@ -574,6 +753,81 @@ export default function EmbedBuilder({
         )}
         Live URL: <span className="break-all text-gray-500">{url}</span>
       </p>
+
+      {savedList.length > 0 && (
+        <SavedList rows={savedList} origin={origin} currentId={current?.id ?? null} />
+      )}
+    </div>
+  );
+}
+
+/** Every saved embed this person can manage, with edit and delete. */
+function SavedList({
+  rows,
+  origin,
+  currentId,
+}: {
+  rows: SavedEmbedRow[];
+  origin: string;
+  currentId: string | null;
+}) {
+  const router = useRouter();
+  const [pending, start] = useTransition();
+  const [error, setError] = useState<string | null>(null);
+
+  function remove(row: SavedEmbedRow) {
+    if (!window.confirm(`Delete "${row.name}"? Pages using its link will show Not Found.`)) return;
+    start(async () => {
+      const r = await deleteSavedEmbedAction(row.id);
+      if (!r.ok) setError(r.error);
+      else {
+        if (row.id === currentId) router.replace("/embeds");
+        router.refresh();
+      }
+    });
+  }
+
+  return (
+    <div className="rounded-xl border border-gray-800 bg-gray-900/40 p-4">
+      <h3 className="mb-3 text-sm font-semibold text-gray-200">Saved embeds</h3>
+      {error && <p className="mb-2 text-xs text-red-400">{error}</p>}
+      <div className="overflow-x-auto">
+        <table className="w-full text-xs">
+          <thead className="text-left text-gray-500">
+            <tr>
+              <th className="p-2">Name</th>
+              <th className="p-2">Link</th>
+              <th className="p-2">Last changed</th>
+              <th className="p-2" />
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r) => (
+              <tr key={r.id} className={`border-t border-gray-800 ${r.id === currentId ? "bg-blue-950/30" : ""}`}>
+                <td className="p-2 font-medium text-gray-200">{r.name}</td>
+                <td className="p-2 font-mono text-gray-500">{`${origin}/embed/e/${r.code}`}</td>
+                <td className="p-2 text-gray-500">
+                  {new Date(r.updatedAt).toLocaleString("en-US", { timeZone: "America/New_York" })} ET
+                  {r.updatedBy ? ` · ${r.updatedBy}` : ""}
+                </td>
+                <td className="whitespace-nowrap p-2 text-right">
+                  <a href={`/embeds?saved=${r.id}`} className="text-blue-400 hover:underline">
+                    Edit
+                  </a>
+                  <button
+                    type="button"
+                    onClick={() => remove(r)}
+                    disabled={pending}
+                    className="ml-3 text-red-400 hover:underline disabled:opacity-40"
+                  >
+                    Delete
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }

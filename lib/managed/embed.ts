@@ -129,6 +129,16 @@ export interface EmbedOptions {
    */
   limit: number;
   layout: LayoutMode;
+  /**
+   * Grouped only: the order of sub-portfolio sections (and tabs).
+   *   default        — the publication's own display order
+   *   alpha          — A to Z by name
+   *   outperformance — return minus its benchmark's, highest first; books
+   *                    with no comparison go last
+   */
+  order: "default" | "alpha" | "outperformance";
+  /** Readers can click a column header to sort that table. On by default. */
+  sortable: boolean;
   /** Grouped only: tabs across the top that let the READER switch between books. */
   tabs: boolean;
   /**
@@ -214,6 +224,11 @@ export function parseEmbedOptions(
     })(),
     layout: one(sp.layout) === "grouped" ? "grouped" : "merged",
     tabs: on(one(sp.tabs)),
+    order: (() => {
+      const v = one(sp.order);
+      return v === "alpha" || v === "outperformance" ? v : "default";
+    })(),
+    sortable: !off(one(sp.sort)),
     allTab: !off(one(sp.all)),
     look: {
       theme: one(sp.theme) === "dark" ? "dark" : "light",
@@ -606,6 +621,23 @@ async function buildView(
   ]);
 
   const allPositions = portfolios.flatMap((p) => p.positions);
+
+  if (options.order === "alpha") {
+    groups.sort((a, b) => a.title.localeCompare(b.title));
+  } else if (options.order === "outperformance") {
+    const edge = (g: EmbedBlock) =>
+      g.showBenchmark && g.portfolioReturn !== null && g.benchmarkReturn !== null
+        ? g.portfolioReturn.minus(g.benchmarkReturn).toNumber()
+        : null;
+    groups.sort((a, b) => {
+      const ea = edge(a);
+      const eb = edge(b);
+      if (ea === null && eb === null) return 0;
+      if (ea === null) return 1;
+      if (eb === null) return -1;
+      return eb - ea;
+    });
+  }
 
   return {
     ...whole,

@@ -13,7 +13,9 @@ on:
   schedule:
     # Times are UTC. Runs pre-market, midday, and post-close ET so data stays current
     # even if GitHub delays one run (scheduled crons are best-effort, not exact).
-    - cron: '0 12,17,22 * * *'
+    - cron: '0 12,17 * * *'
+    # The post-close run also pulls Airtable into Portfolio Manager (once a day).
+    - cron: '0 22 * * *'
   workflow_dispatch:      # allows manual "Run workflow" from the Actions tab
     inputs:
       managed_pubs:
@@ -59,10 +61,11 @@ jobs:
           echo "Sync accepted."
 
       - name: Pull Airtable trades into Portfolio Manager
-        # Scheduled runs only once repo variable MANAGED_SYNC_ENABLED is "true",
+        # Scheduled only once repo variable MANAGED_SYNC_ENABLED is "true",
         # so nothing is applied before a dry run has been reviewed. A manual run
         # always works, and previews unless managed_dry_run is unticked.
-        if: ${{ github.event_name == 'workflow_dispatch' || vars.MANAGED_SYNC_ENABLED == 'true' }}
+        # Once a day: only the post-close schedule (22:00 UTC = 6pm EDT / 5pm EST).
+        if: ${{ github.event_name == 'workflow_dispatch' || (vars.MANAGED_SYNC_ENABLED == 'true' && github.event.schedule == '0 22 * * *') }}
         # The embeds read Portfolio Manager, not the Airtable mirror above. This
         # brings Airtable-sourced positions up to date (new positions, partial
         # exits, closes). See lib/managed/airtable-sync.ts for what it never
