@@ -22,7 +22,7 @@ import { prisma } from "../prisma";
 import { fetchSnapshots, isMassiveConfigured } from "../massive";
 import { fetchTmxQuote, isTorontoTicker } from "./tmx";
 import { fetchHomeListingPrice, HOME_LISTINGS } from "./foreign-listings";
-import { previousSession } from "./closing-prices";
+import { closeInstant, previousSession } from "./closing-prices";
 import { recomputePosition } from "./positions";
 import { fetchNav, navEligible } from "./nav";
 
@@ -206,8 +206,11 @@ export async function refreshPrices(): Promise<RefreshReport> {
         where: { ticker },
         data: {
           lastPrice: quote.price.toString(),
-          // Date only — a NAV has no meaningful time of day.
-          lastPriceAt: quote.asOf,
+          // A NAV is dated, not timed: it is the fund's value at that day's
+          // close. Stored as 4:00 PM New York on its date, like every other
+          // close — midnight UTC read back in New York as 8:00 PM the day
+          // BEFORE, which is how a 9/28 NAV showed as "Sep 27, 8:00 PM ET".
+          lastPriceAt: quote.asOf ? closeInstant(quote.asOf.toISOString().slice(0, 10)) : null,
           priceSource: "NAV",
           navAssetClass: quote.assetClass,
         },
@@ -215,11 +218,9 @@ export async function refreshPrices(): Promise<RefreshReport> {
       pricedTickers.add(ticker);
       report.priced += 1;
       report.pricedByNav += 1;
-      if (
-        quote.asOf &&
-        (!report.oldestPriceAt || quote.asOf < report.oldestPriceAt)
-      ) {
-        report.oldestPriceAt = quote.asOf;
+      const navAt = quote.asOf ? closeInstant(quote.asOf.toISOString().slice(0, 10)) : null;
+      if (navAt && (!report.oldestPriceAt || navAt < report.oldestPriceAt)) {
+        report.oldestPriceAt = navAt;
       }
       // Fill a blank company name from the fund's own reported name.
       if (quote.name) {
