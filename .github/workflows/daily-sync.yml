@@ -90,7 +90,7 @@ jobs:
             # A publication's full report can be megabytes (thousands of
             # positions); GitHub drops a log line that long, so print counts
             # and keep the whole report as an artifact.
-            SUMMARY=$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print({k:(len(v) if isinstance(v,list) else v) for k,v in d.items()})' "managed-sync-${PUB}.json" 2>/dev/null || head -c 500 /tmp/managed_resp.txt)
+            SUMMARY=$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print({k:(v if k=="fixes" else len(v) if isinstance(v,list) else v) for k,v in d.items()})' "managed-sync-${PUB}.json" 2>/dev/null || head -c 500 /tmp/managed_resp.txt)
             echo "${PUB} (${HTTP_CODE}): ${SUMMARY}"
             if [ "${HTTP_CODE}" != "${OK}" ]; then
               echo "::error::Portfolio Manager sync for ${PUB} failed with HTTP ${HTTP_CODE}"

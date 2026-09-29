@@ -32,7 +32,7 @@
 import { prisma } from "../prisma";
 import { dec, type D } from "../money";
 import { recomputePosition } from "./positions";
-import { applyTickerRenames, enforcePublicationOwner } from "./data-fixes";
+import { applyTickerRenames, enforcePublicationOwner, pendingFixes } from "./data-fixes";
 import { MAIN_PORTFOLIO_NAME } from "./portfolios";
 import {
   commitImport,
@@ -385,6 +385,8 @@ export async function syncPublicationFromAirtable(
       report.alreadyHere.push({ position: label, matches });
     }
   }
+
+  if (dryRun) report.fixes.push(...(await pendingFixes(pubCode)));
 
   if (!dryRun) {
     // Standing corrections first, so the comparison below sees the fixed

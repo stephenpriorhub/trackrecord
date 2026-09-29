@@ -85,3 +85,25 @@ export async function enforcePublicationOwner(pubCode: string): Promise<number> 
   });
   return r.count;
 }
+
+/** What applyTickerRenames + enforcePublicationOwner WOULD change — for a dry run. */
+export async function pendingFixes(pubCode: string): Promise<string[]> {
+  const out: string[] = [];
+  for (const [from, to] of Object.entries(TICKER_RENAMES)) {
+    const n = await prisma.managedLeg.count({ where: { marketTicker: from, kind: "STOCK" } });
+    if (n > 0) out.push(`would rename ${from} -> ${to} (${n} leg${n === 1 ? "" : "s"})`);
+  }
+  const slug = PUBLICATION_OWNER[pubCode];
+  if (slug) {
+    const guru = await prisma.guru.findUnique({ where: { slug }, select: { id: true } });
+    const n = await prisma.managedPosition.count({
+      where: {
+        deletedAt: null,
+        portfolio: { service: { pubCode } },
+        ...(guru ? { OR: [{ guruId: null }, { guruId: { not: guru.id } }] } : {}),
+      },
+    });
+    if (n > 0) out.push(`would set ${n} position${n === 1 ? "" : "s"} to ${slug}`);
+  }
+  return out;
+}
