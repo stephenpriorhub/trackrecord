@@ -22,7 +22,11 @@
  */
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { deleteSavedEmbedAction, saveEmbedAction } from "./actions";
+import {
+  deleteSavedEmbedAction,
+  saveEmbedAction,
+  setPortfolioVisibilityAction,
+} from "./actions";
 
 type Show = "both" | "open" | "closed";
 type Summary = "benchmark" | "portfolio" | "none";
@@ -343,13 +347,11 @@ export default function EmbedBuilder({
 
   return (
     <div className="space-y-5">
-      {!targetPublic && (
-        <p className="rounded-lg border border-yellow-800/50 bg-yellow-900/20 p-3 text-xs text-yellow-300">
-          {whole
-            ? "No portfolio in this publication is public yet, so the live link returns Not Found. Set at least one to Public in its settings. The preview below works now."
-            : "This portfolio is private, so the live link returns Not Found. Set Embed to Public in Portfolio settings to make it live. The preview below works now."}
-        </p>
-      )}
+      <PublishBar
+        books={selected}
+        allPrivate={!targetPublic}
+        onChanged={() => router.refresh()}
+      />
 
       <Panel title="What to embed">
           <div className="flex flex-wrap items-end gap-4">
@@ -757,6 +759,80 @@ export default function EmbedBuilder({
       {savedList.length > 0 && (
         <SavedList rows={savedList} origin={origin} currentId={current?.id ?? null} />
       )}
+    </div>
+  );
+}
+
+/**
+ * Which of the selected portfolios are private, with a Publish button each.
+ *
+ * Every portfolio starts private, and a private one is left out of the live
+ * embed (or 404s on its own), which is why the preview carries a "not
+ * published" banner. Publishing is the same switch as "Embed: Public" in
+ * Portfolio settings, offered here where the question actually comes up.
+ */
+function PublishBar({
+  books,
+  allPrivate,
+  onChanged,
+}: {
+  books: EmbedBook[];
+  allPrivate: boolean;
+  onChanged: () => void;
+}) {
+  const [pending, start] = useTransition();
+  const [error, setError] = useState<string | null>(null);
+  const [done, setDone] = useState<string[]>([]);
+  const privateBooks = books.filter((b) => !b.isPublic && !done.includes(b.slug));
+  if (privateBooks.length === 0) return null;
+
+  function publish(slugs: string[]) {
+    setError(null);
+    start(async () => {
+      for (const slug of slugs) {
+        const r = await setPortfolioVisibilityAction(slug, true);
+        if (!r.ok) {
+          setError(r.error);
+          return;
+        }
+        setDone((d) => [...d, slug]);
+      }
+      onChanged();
+    });
+  }
+
+  return (
+    <div className="rounded-lg border border-yellow-800/50 bg-yellow-900/20 p-3 text-xs text-yellow-200">
+      <p className="mb-2">
+        {allPrivate
+          ? "Nothing selected is published yet, so the live link shows Not Found. The preview below works now."
+          : `${privateBooks.length} selected portfolio${privateBooks.length === 1 ? " is" : "s are"} private and left out of the live embed.`}{" "}
+        Publish to make {privateBooks.length === 1 ? "it" : "them"} visible to readers:
+      </p>
+      <div className="flex flex-wrap items-center gap-1.5">
+        {privateBooks.map((b) => (
+          <button
+            key={b.slug}
+            type="button"
+            disabled={pending}
+            onClick={() => publish([b.slug])}
+            className="rounded-full border border-yellow-700/60 bg-yellow-900/40 px-3 py-1 font-medium hover:bg-yellow-800/50 disabled:opacity-50"
+          >
+            Publish {b.name}
+          </button>
+        ))}
+        {privateBooks.length > 1 && (
+          <button
+            type="button"
+            disabled={pending}
+            onClick={() => publish(privateBooks.map((b) => b.slug))}
+            className="rounded-full bg-yellow-600 px-3 py-1 font-semibold text-gray-950 hover:bg-yellow-500 disabled:opacity-50"
+          >
+            Publish all {privateBooks.length}
+          </button>
+        )}
+      </div>
+      {error && <p className="mt-2 text-red-300">{error}</p>}
     </div>
   );
 }

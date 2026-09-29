@@ -50,8 +50,10 @@ export default function EmbedBody({ view }: { view: EmbedView }) {
           // Loud and unmissable: this render includes a book that is NOT public,
           // so nobody should paste this URL into a page believing it will work.
           <p className="pf-preview">
-            Preview — not published. Visitors see Not Found until this portfolio
-            is set to Public.
+            {view.kind === "service"
+              ? "Preview — includes private portfolios that readers will not see until they are published."
+              : "Preview — this portfolio is private, so readers see Not Found until it is published."}{" "}
+            Publish from the Embeds page in the hub, or Portfolio settings → Embed: Public.
           </p>
         )}
         <header className="pf-head">

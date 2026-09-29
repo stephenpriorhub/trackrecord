@@ -32,6 +32,7 @@
 import { prisma } from "../prisma";
 import { dec, type D } from "../money";
 import { recomputePosition } from "./positions";
+import { applyTickerRenames, enforcePublicationOwner } from "./data-fixes";
 import { MAIN_PORTFOLIO_NAME } from "./portfolios";
 import {
   commitImport,
@@ -252,6 +253,8 @@ export interface SyncReport {
   unchanged: number;
   conflicts: { position: string; reason: string }[];
   errors: { position: string; message: string }[];
+  /** Standing corrections applied this run (ticker renames, owners). */
+  fixes: string[];
 }
 
 function describe(fills: { intent: string; quantity: number; price: string | D; executedAt: Date }[]): string {
@@ -288,6 +291,7 @@ export async function syncPublicationFromAirtable(
     unchanged: 0,
     conflicts: [],
     errors: [],
+    fixes: [],
   };
 
   // Only publications whose books already came from Airtable. The sheet-fed
@@ -383,6 +387,12 @@ export async function syncPublicationFromAirtable(
   }
 
   if (!dryRun) {
+    // Standing corrections first, so the comparison below sees the fixed
+    // tickers and a re-import cannot bring an old value back.
+    report.fixes.push(...(await applyTickerRenames()));
+    const owned = await enforcePublicationOwner(pubCode);
+    if (owned > 0) report.fixes.push(`${owned} position${owned === 1 ? "" : "s"} set to the publication's owner`);
+
     for (const [airtableId, managedId] of adoptions) {
       await prisma.managedPosition.update({
         where: { id: managedId },
@@ -574,6 +584,7 @@ export function summariseSync(r: SyncReport) {
     toCreate: r.toCreate,
     alreadyHere: r.alreadyHere,
     adopted: r.adopted,
+    fixes: r.fixes,
     rebuilt: r.rebuilt.length,
     unchanged: r.unchanged,
     changes: r.rebuilt,

@@ -20,6 +20,7 @@
  */
 import { prisma } from "../prisma";
 import { fetchSnapshots, isMassiveConfigured } from "../massive";
+import { fetchTmxQuote, isTorontoTicker } from "./tmx";
 import { recomputePosition } from "./positions";
 import { fetchNav, navEligible } from "./nav";
 
@@ -179,6 +180,29 @@ export async function refreshPrices(): Promise<RefreshReport> {
           data: { companyName: quote.name },
         });
       }
+    }
+  }
+
+  // TORONTO FALLBACK. Massive is US-only, so a TSX listing (SJ.TO) is priced
+  // from TMX Money, the exchange's own quote service. See ./tmx.ts.
+  for (const ticker of tickers.filter(
+    (t) => !pricedTickers.has(t.toUpperCase()) && isTorontoTicker(t),
+  )) {
+    const quote = await fetchTmxQuote(ticker);
+    if (!quote) continue;
+    await prisma.marketInstrument.update({
+      where: { ticker },
+      data: {
+        lastPrice: quote.price.toString(),
+        lastPriceAt: quote.asOf,
+        // A delayed exchange quote with its own timestamp, like Massive's.
+        priceSource: "LAST_TRADE",
+      },
+    });
+    pricedTickers.add(ticker.toUpperCase());
+    report.priced += 1;
+    if (quote.asOf && (!report.oldestPriceAt || quote.asOf < report.oldestPriceAt)) {
+      report.oldestPriceAt = quote.asOf;
     }
   }
 

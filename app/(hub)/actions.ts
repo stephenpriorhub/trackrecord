@@ -924,3 +924,37 @@ export async function deleteSavedEmbedAction(id: string): Promise<ActionResult> 
   revalidatePath("/embeds");
   return { ok: true, message: "Deleted." };
 }
+
+// ------------------------------------------------------------ publishing
+
+/**
+ * Publish or unpublish one portfolio, by slug, from the Embeds page — the same
+ * change as "Embed: Public" in Portfolio settings, audited the same way.
+ */
+export async function setPortfolioVisibilityAction(
+  portfolioSlug: string,
+  makePublic: boolean,
+): Promise<ActionResult> {
+  const { user, scope } = await actor();
+  const before = await prisma.managedPortfolio.findUnique({ where: { slug: portfolioSlug } });
+  if (!before) return { ok: false, error: "Portfolio not found." };
+  if (!(await canManagePortfolio(scope, before.id))) return DENIED;
+
+  const visibility = makePublic ? "PUBLIC" : "PRIVATE";
+  if (before.visibility === visibility) return { ok: true };
+  await prisma.managedPortfolio.update({ where: { id: before.id }, data: { visibility } });
+  await logChange({
+    action: "portfolio.update",
+    entity: "ManagedPortfolio",
+    entityId: before.id,
+    portfolioId: before.id,
+    actor: user,
+    before: { visibility: before.visibility },
+    after: { visibility },
+    summary: makePublic ? "Published from the Embeds page" : "Unpublished from the Embeds page",
+  });
+  revalidatePath("/");
+  revalidatePath("/embeds");
+  revalidatePath(`/portfolio/${before.id}`);
+  return { ok: true, message: makePublic ? "Published." : "Unpublished." };
+}

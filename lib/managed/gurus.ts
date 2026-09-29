@@ -95,6 +95,18 @@ export const PUB_EDITORS: Record<string, string[]> = {
   DPL: ["nate"],
 };
 
+/**
+ * Publications where EVERY position belongs to one guru, whatever Airtable's
+ * per-position Person field says (often blank, occasionally wrong).
+ *
+ * Stephen, 2026-09-29: "All stocks in XAI are Matt McCall." This is stronger
+ * than soleEditor(), which only fills a blank: here the owner is a fact about
+ * the publication, and the Airtable sync re-applies it every run.
+ */
+export const PUBLICATION_OWNER: Record<string, string> = {
+  XAI: "matt",
+};
+
 /** The sole editor of a publication, or null when it has more than one. */
 export function soleEditor(pubCode: string): string | null {
   const editors = PUB_EDITORS[pubCode];

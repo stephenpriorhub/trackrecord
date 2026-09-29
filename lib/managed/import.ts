@@ -36,7 +36,8 @@ import {
 } from "./portfolios";
 import { createPosition, type LegInput } from "./positions";
 import { resolveWarRoomOwner } from "./war-room-owners";
-import { guruSlugs, soleEditor } from "./gurus";
+import { guruSlugs, soleEditor, PUBLICATION_OWNER } from "./gurus";
+import { TICKER_RENAMES } from "./data-fixes";
 
 /** The Trade Group table. Not in lib/airtable.ts TABLES because only the import needs it. */
 const TRADE_GROUP_TABLE = "tbl80YmMPJzACPX7b";
@@ -430,7 +431,8 @@ async function importOnePosition(
   // One leg per distinct symbol, using its earliest opening trade for the price.
   const bySymbol = new Map<string, any>();
   for (const t of opens) {
-    const sym = String(t.fields["SYMBOL"]).trim().toUpperCase();
+    const raw = String(t.fields["SYMBOL"]).trim().toUpperCase();
+    const sym = TICKER_RENAMES[raw] ?? raw;
     const prev = bySymbol.get(sym);
     const date = t.fields["Trade Date"]
       ? Date.parse(t.fields["Trade Date"])
@@ -562,6 +564,8 @@ function resolveOwner(
       : null;
     return resolveWarRoomOwner(symbols, openDate, named);
   }
+  // A publication owned outright by one guru needs no per-position lookup.
+  if (PUBLICATION_OWNER[pubCode]) return PUBLICATION_OWNER[pubCode];
   // Elsewhere an ambiguous rollup is left unattributed rather than guessed.
   return named.length === 1 ? named[0] : null;
 }
