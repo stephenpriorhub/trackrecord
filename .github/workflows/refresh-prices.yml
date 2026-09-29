@@ -23,6 +23,10 @@ on:
     # schedule does not need editing twice a year. Runs outside the session are
     # harmless — they just re-fetch the same last price.
     - cron: "*/15 13-21 * * 1-5"
+    # Prices are the PREVIOUS session's close (lib/managed/closing-prices.ts),
+    # so one run after midnight ET puts the new day's close in place before
+    # anyone reads the page. 05:15 UTC = 1:15 AM EDT / 12:15 AM EST, Tue-Sat.
+    - cron: "15 5 * * 2-6"
     # Sunday: retire instruments no open position references any more. Without
     # this the batch grows forever with expired option contracts — it was
     # fetching 422 tickers to price 90 before the first sweep.

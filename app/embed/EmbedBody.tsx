@@ -251,10 +251,9 @@ function asOfLine(at: Date | null, sources: string[]): string {
 
   const notes: string[] = [];
   if (sources.includes("LAST_TRADE")) {
-    notes.push(`market data delayed ${marketDataDelayMinutes()} minutes`);
+    notes.push(`some prices are intraday, delayed ${marketDataDelayMinutes()} minutes`);
   }
   if (sources.includes("NAV")) notes.push("fund prices are the last published NAV");
-  if (sources.includes("PREV_CLOSE")) notes.push("some prices are the previous close");
   if (sources.includes("MANUAL")) notes.push("some prices are entered by the editor");
   if (sources.includes("STALE")) {
     notes.push("holdings with no trade in the last few days show no current price");
@@ -262,15 +261,24 @@ function asOfLine(at: Date | null, sources: string[]): string {
 
   if (!at) return notes.length ? `Current prices: ${notes.join(" · ")}` : "Current prices not yet available.";
 
-  const stamp = at.toLocaleString("en-US", {
+  // Prices are the previous session's official close (lib/managed/closing-prices.ts),
+  // so the line names the session rather than a clock time.
+  const dayStr = at.toLocaleDateString("en-US", {
     timeZone: "America/New_York",
     month: "short",
     day: "numeric",
     year: "numeric",
+  });
+  const timeStr = at.toLocaleTimeString("en-US", {
+    timeZone: "America/New_York",
     hour: "numeric",
     minute: "2-digit",
   });
-  return [`Current price last updated ${stamp} ET`, ...notes].join(" · ");
+  const head =
+    timeStr === "4:00 PM"
+      ? `Prices as of the ${dayStr} close (4:00 PM ET)`
+      : `Prices as of ${dayStr}, ${timeStr} ET`;
+  return [head, ...notes].join(" · ");
 }
 
 function Pct({ v }: { v: D | null }) {

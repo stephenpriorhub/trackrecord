@@ -22,6 +22,7 @@ import { prisma } from "../prisma";
 import { fetchSnapshots, isMassiveConfigured } from "../massive";
 import { fetchTmxQuote, isTorontoTicker } from "./tmx";
 import { fetchHomeListingPrice, HOME_LISTINGS } from "./foreign-listings";
+import { previousSession } from "./closing-prices";
 import { recomputePosition } from "./positions";
 import { fetchNav, navEligible } from "./nav";
 
@@ -101,10 +102,26 @@ export async function refreshPrices(): Promise<RefreshReport> {
 
   const pricedTickers = new Set<string>();
 
+  // PREVIOUS-CLOSE PRICING (see ./closing-prices.ts). Stocks and ETFs take the
+  // last completed session's official close; the snapshot's intraday print is
+  // not written for them. Options keep the snapshot, which for them is already
+  // the previous close. If the grouped call fails, stocks fall back to the
+  // snapshot rather than going unpriced.
+  const session = await previousSession();
+  const stockTickers = new Set(
+    (
+      await prisma.marketInstrument.findMany({
+        where: { ticker: { in: tickers }, kind: "STOCK" },
+        select: { ticker: true },
+      })
+    ).map((i) => i.ticker.toUpperCase()),
+  );
+
   for (const [ticker, row] of snapshot.rows) {
     // `missing` catches an absent row; this catches the echoed stub that IS
     // present but carries no price. Both mean unpriced, never zero.
     if (row.last === null) continue;
+    if (session && stockTickers.has(ticker.toUpperCase())) continue;
 
     await prisma.marketInstrument.update({
       where: { ticker },
@@ -132,18 +149,34 @@ export async function refreshPrices(): Promise<RefreshReport> {
     }
   }
 
+  if (session) {
+    for (const ticker of tickers) {
+      const t = ticker.toUpperCase();
+      if (!stockTickers.has(t)) continue;
+      const close = session.closes.get(t);
+      if (!close) continue; // no trade that session: the older price stays and ages
+      await prisma.marketInstrument.update({
+        where: { ticker },
+        data: { lastPrice: close.toString(), lastPriceAt: session.at, priceSource: "PREV_CLOSE" },
+      });
+      pricedTickers.add(t);
+      report.priced += 1;
+      if (!report.oldestPriceAt || session.at < report.oldestPriceAt) report.oldestPriceAt = session.at;
+    }
+  }
+
   // HOME-MARKET PRICES. For an OTC line that barely trades (SSNLF), the home
   // listing's close in dollars REPLACES Massive's print, which can be months
   // old. See ./foreign-listings.ts.
   for (const ticker of tickers.filter((t) => HOME_LISTINGS[t.toUpperCase()])) {
-    const quote = await fetchHomeListingPrice(ticker);
+    const quote = await fetchHomeListingPrice(ticker, session?.date);
     if (!quote) continue;
     await prisma.marketInstrument.update({
       where: { ticker },
       data: {
         lastPrice: quote.price.toDecimalPlaces(6).toString(),
         lastPriceAt: quote.asOf,
-        priceSource: "LAST_TRADE",
+        priceSource: session ? "PREV_CLOSE" : "LAST_TRADE",
       },
     });
     if (!pricedTickers.has(ticker.toUpperCase())) report.priced += 1;
@@ -207,15 +240,14 @@ export async function refreshPrices(): Promise<RefreshReport> {
   for (const ticker of tickers.filter(
     (t) => !pricedTickers.has(t.toUpperCase()) && isTorontoTicker(t),
   )) {
-    const quote = await fetchTmxQuote(ticker);
+    const quote = await fetchTmxQuote(ticker, session?.date);
     if (!quote) continue;
     await prisma.marketInstrument.update({
       where: { ticker },
       data: {
         lastPrice: quote.price.toString(),
         lastPriceAt: quote.asOf,
-        // A delayed exchange quote with its own timestamp, like Massive's.
-        priceSource: "LAST_TRADE",
+        priceSource: session ? "PREV_CLOSE" : "LAST_TRADE",
       },
     });
     pricedTickers.add(ticker.toUpperCase());

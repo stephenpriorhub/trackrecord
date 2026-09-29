@@ -11,14 +11,15 @@
  * THE RULE (Stephen, 2026-09-29: Massive's data, "daily is actually okay")
  *   An exchange price (LAST_TRADE / PREV_CLOSE) older than STALE_AFTER_DAYS is
  *   treated exactly like a missing price: no mark, no return ("—"), and it is
- *   left out of the freshness stamp. Four days covers a weekend plus a Monday
- *   holiday, so an ordinary daily close is always usable.
+ *   left out of the freshness stamp. Prices are the previous session's close,
+ *   so after a Monday holiday Friday's close must last until Wednesday's run —
+ *   up to ~4.4 days. Five keeps every ordinary close usable.
  *
  *   Not applied to NAV (an interval fund publishes on its own schedule), to
  *   MANUAL (an editor-entered price is deliberately static), or to a price
  *   with no timestamp at all (options) — there is nothing to judge.
  */
-export const STALE_AFTER_DAYS = 4;
+export const STALE_AFTER_DAYS = 5;
 
 interface PricedInstrument {
   lastPrice: unknown;
