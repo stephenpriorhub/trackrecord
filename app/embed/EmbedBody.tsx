@@ -496,7 +496,8 @@ const CSS = `
 .pf-summary strong { font-weight: 700; color: var(--pf-strong); }
 .pf-summary .dim { font-size: 13px; }
 .pf-basis { margin: 4px 0 0; font-size: 12px; color: var(--pf-muted); }
-.pf-foot { padding: 4px 8px 0; border-top: 1px solid var(--pf-line); }
+.pf-foot { padding: 4px 8px 0; border-top: 1px solid var(--pf-line); text-align: center; }
+.pf-foot .pf-method { margin-left: auto; margin-right: auto; }
 .pf-asof { margin: 8px 0 0; font-size: 12px; color: var(--pf-muted); }
 .pf-method { margin: 4px 0 0; font-size: 12px; color: var(--pf-muted); max-width: 70ch; }
 .pf .wt { color: var(--pf-muted); font-variant-numeric: tabular-nums; }
