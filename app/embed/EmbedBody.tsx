@@ -36,6 +36,15 @@ export default function EmbedBody({ view }: { view: EmbedView }) {
   return (
     <>
       <style>{CSS}</style>
+      {/* THE TRANSPARENCY RULE. A browser paints an opaque canvas behind an
+          iframe whenever the iframe element's color-scheme (inherited from the
+          host page) differs from the embedded document's. A host in dark mode
+          plus an undeclared (light) embed = a solid white block, whatever the
+          background is set to. So the document declares the theme's scheme
+          here, and the builder's snippet puts the SAME value on the iframe
+          element, so the two match on any host. Body and html are transparent
+          so only the .pf background ever paints. */}
+      <style>{`html{color-scheme:${look.theme}}html,body{background:transparent}`}</style>
       <div
         className="pf"
         data-theme={look.theme}
@@ -464,10 +473,8 @@ const CSS = `
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   color: var(--pf-text); background: var(--pf-bg); padding: 16px; box-sizing: border-box;
 }
-/* Dark is only ever chosen explicitly (?theme=dark). No color-scheme is
-   declared, on purpose: an iframe whose color-scheme differs from its host's
-   gets an opaque canvas painted behind it, which would break a transparent
-   background. */
+/* Dark is only ever chosen explicitly (?theme=dark). The document's
+   color-scheme is set to match (see SCHEME below) — never left undeclared. */
 .pf[data-theme="dark"] {
   --pf-bg: #0b0f14; --pf-card: #121821; --pf-text: #d1d5db; --pf-strong: #f9fafb;
   --pf-muted: #9ca3af; --pf-dim: #6b7280; --pf-line: #243041; --pf-line2: #1a2230;
@@ -664,7 +671,10 @@ const RESIZE = `
     var h = pf ? Math.ceil(pf.getBoundingClientRect().height) : document.documentElement.scrollHeight;
     if (h === last) return;
     last = h;
-    window.parent.postMessage({ type: "oxfordhub:portfolio-embed:height", height: h, path: location.pathname }, "*");
+    // The scheme travels with the height so the host snippet can keep the
+    // iframe element's color-scheme matched even if a saved embed's theme is
+    // changed after it was pasted (see the transparency rule above).
+    window.parent.postMessage({ type: "oxfordhub:portfolio-embed:height", height: h, path: location.pathname, scheme: getComputedStyle(document.documentElement).colorScheme }, "*");
   }
   send();
   window.addEventListener("load", send);

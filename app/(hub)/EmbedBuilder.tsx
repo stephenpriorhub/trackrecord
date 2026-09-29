@@ -308,7 +308,7 @@ export default function EmbedBuilder({
 
   const snippet = useMemo(() => {
     const transparent = bg === "none" ? ' allowtransparency="true"' : "";
-    const iframe = `<iframe data-mta-embed src="${savedUrl ?? url}" title="${whole ? "Track record" : "Portfolio"}" width="100%" height="600" style="border:0;width:100%;background:transparent"${transparent} loading="lazy"></iframe>`;
+    const iframe = `<iframe data-mta-embed src="${savedUrl ?? url}" title="${whole ? "Track record" : "Portfolio"}" width="100%" height="600" style="border:0;width:100%;background:transparent;color-scheme:${theme}"${transparent} loading="lazy"></iframe>`;
     if (!autoHeight) return iframe;
     // The embed posts its height on load and whenever it reflows (including
     // when a reader switches portfolio in the dropdown). Matching on the
@@ -318,11 +318,13 @@ export default function EmbedBuilder({
   window.addEventListener("message", function (e) {
     if (!e.data || e.data.type !== "oxfordhub:portfolio-embed:height") return;
     document.querySelectorAll("iframe[data-mta-embed]").forEach(function (f) {
-      if (f.contentWindow === e.source) f.style.height = e.data.height + "px";
+      if (f.contentWindow !== e.source) return;
+      f.style.height = e.data.height + "px";
+      if (e.data.scheme) f.style.colorScheme = e.data.scheme;
     });
   });
 </script>`;
-  }, [url, savedUrl, autoHeight, whole, bg]);
+  }, [url, savedUrl, autoHeight, whole, bg, theme]);
 
   async function copy() {
     try {
@@ -955,7 +957,9 @@ function LivePreview({ src }: { src: string }) {
           src={shown}
           title="Embed preview"
           className="w-full border-0 bg-transparent"
-          style={{ height }}
+          // Same matching rule as the pasted snippet, or the preview would show
+          // the opaque backdrop the fix exists to prevent.
+          style={{ height, colorScheme: /[?&]theme=dark/.test(shown) ? "dark" : "light" }}
         />
       </div>
     </div>
