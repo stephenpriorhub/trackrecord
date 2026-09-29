@@ -83,15 +83,6 @@ export default function EmbedBody({ view }: { view: EmbedView }) {
               />
             </div>
           )}
-          <p className="pf-asof">{asOfLine(view.priceAsOf, view.priceSources)}</p>
-          {options.summary !== "none" && (
-            // The method, stated once. The Weight column shows it row by row.
-            <p className="pf-method">
-              How returns are weighted: every position counts as 1. When part of a
-              position is sold, it is split by size — sell half and the closed half
-              counts 0.5 and the half still held counts 0.5.
-            </p>
-          )}
         </header>
 
         {options.tabs && (
@@ -130,6 +121,20 @@ export default function EmbedBody({ view }: { view: EmbedView }) {
         ) : (
           <Tables block={view} options={options} level={2} />
         )}
+
+        {/* Freshness and method as a footer: they qualify every figure above,
+            but a reader should reach the returns first. */}
+        <footer className="pf-foot">
+          <p className="pf-asof">{asOfLine(view.priceAsOf, view.priceSources)}</p>
+          {options.summary !== "none" && (
+            // The method, stated once. The Weight column shows it row by row.
+            <p className="pf-method">
+              How returns are weighted: every position counts as 1. When part of a
+              position is sold, it is split by size — sell half and the closed half
+              counts 0.5 and the half still held counts 0.5.
+            </p>
+          )}
+        </footer>
       </div>
       {/* Report our height so a host page can size the iframe without a scrollbar. */}
       <script dangerouslySetInnerHTML={{ __html: RESIZE }} />
@@ -491,6 +496,7 @@ const CSS = `
 .pf-summary strong { font-weight: 700; color: var(--pf-strong); }
 .pf-summary .dim { font-size: 13px; }
 .pf-basis { margin: 4px 0 0; font-size: 12px; color: var(--pf-muted); }
+.pf-foot { padding: 4px 8px 0; border-top: 1px solid var(--pf-line); }
 .pf-asof { margin: 8px 0 0; font-size: 12px; color: var(--pf-muted); }
 .pf-method { margin: 4px 0 0; font-size: 12px; color: var(--pf-muted); max-width: 70ch; }
 .pf .wt { color: var(--pf-muted); font-variant-numeric: tabular-nums; }
