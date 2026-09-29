@@ -19,6 +19,7 @@ import { prisma } from "../prisma";
 import { dec, ZERO, type D } from "../money";
 import { benchmarkSince, earliestStart } from "./benchmark";
 import { totalReturn } from "./total-return";
+import { isStale } from "./price-freshness";
 import { benchmarkLabel } from "../publications";
 
 export type ShowMode = "open" | "closed" | "both";
@@ -661,7 +662,7 @@ async function buildView(
           .flatMap((p) =>
             p.legs
               .filter((l) => l.openQty > 0 && l.instrument.lastPrice !== null)
-              .map((l) => l.instrument.priceSource as string),
+              .map((l) => (isStale(l.instrument) ? "STALE" : (l.instrument.priceSource as string))),
           ),
       ),
     ],
@@ -856,7 +857,10 @@ function netExitPrice(
 function oldestPriceAt(
   positions: {
     status: string;
-    legs: { openQty: number; instrument: { lastPriceAt: Date | null } }[];
+    legs: {
+      openQty: number;
+      instrument: { lastPrice: unknown; lastPriceAt: Date | null; priceSource: string };
+    }[];
   }[],
 ): Date | null {
   let oldest: Date | null = null;
@@ -864,6 +868,8 @@ function oldestPriceAt(
     if (p.status !== "OPEN") continue;
     for (const leg of p.legs) {
       if (leg.openQty <= 0) continue;
+      // A stale price is not shown, so it must not date the page either.
+      if (isStale(leg.instrument)) continue;
       const at = leg.instrument.lastPriceAt;
       if (at && (!oldest || at < oldest)) oldest = at;
     }

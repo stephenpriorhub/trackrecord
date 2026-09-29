@@ -25,6 +25,7 @@
  * must not publish a loss, and a blend with a hole in it is not a total.
  */
 import { dec, fraction, type D } from "../money";
+import { freshPrice } from "./price-freshness";
 
 export interface TotalReturnLeg {
   side: string;
@@ -32,7 +33,12 @@ export interface TotalReturnLeg {
   openQty: number;
   closedQty: number;
   wavgExit: unknown;
-  instrument: { lastPrice: unknown; manualPrice: unknown };
+  instrument: {
+    lastPrice: unknown;
+    manualPrice: unknown;
+    lastPriceAt?: Date | null;
+    priceSource?: string | null;
+  };
 }
 
 export interface TotalReturnPosition {
@@ -50,7 +56,9 @@ export const TOTAL_RETURN_SELECT = {
       openQty: true,
       closedQty: true,
       wavgExit: true,
-      instrument: { select: { lastPrice: true, manualPrice: true } },
+      instrument: {
+        select: { lastPrice: true, manualPrice: true, lastPriceAt: true, priceSource: true },
+      },
     },
   },
 } as const;
@@ -76,7 +84,8 @@ export function totalReturn(p: TotalReturnPosition): D | null {
     }
     if (leg.openQty > 0) {
       // Same mark ladder as recomputePosition: live beats manual.
-      const mark = d(leg.instrument.lastPrice) ?? d(leg.instrument.manualPrice);
+      // Same ladder as recomputePosition, stale prices included (price-freshness.ts).
+      const mark = d(freshPrice(leg.instrument)) ?? d(leg.instrument.manualPrice);
       if (!mark) return null;
       legValue = legValue.plus(mark.times(leg.openQty));
     }

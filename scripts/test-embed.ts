@@ -10,6 +10,7 @@
 import assert from "node:assert/strict";
 import { totalReturn } from "../lib/managed/total-return";
 import { parseEmbedOptions } from "../lib/managed/embed";
+import { isStale } from "../lib/managed/price-freshness";
 
 let failures = 0;
 function check(name: string, fn: () => void) {
@@ -146,6 +147,23 @@ check("order and sort options parse", () => {
   assert.equal(parseEmbedOptions({ order: "junk" }).order, "default");
   assert.equal(parseEmbedOptions({}).sortable, true);
   assert.equal(parseEmbedOptions({ sort: "0" }).sortable, false);
+});
+
+console.log("\nprice freshness");
+
+check("a months-old exchange print is stale (SSNLF, May 4)", () => {
+  assert.equal(isStale({ lastPrice: 154.22, lastPriceAt: new Date("2026-05-04T12:00:00Z"), priceSource: "LAST_TRADE" }, new Date("2026-09-29T14:00:00Z")), true);
+});
+
+check("a Friday close is still usable on Tuesday", () => {
+  assert.equal(isStale({ lastPrice: 1, lastPriceAt: new Date("2026-09-25T20:00:00Z"), priceSource: "LAST_TRADE" }, new Date("2026-09-29T14:00:00Z")), false);
+});
+
+check("NAV, manual and untimestamped prices are never judged stale", () => {
+  const old = new Date("2026-01-01");
+  assert.equal(isStale({ lastPrice: 1, lastPriceAt: old, priceSource: "NAV" }), false);
+  assert.equal(isStale({ lastPrice: 1, lastPriceAt: old, priceSource: "MANUAL" }), false);
+  assert.equal(isStale({ lastPrice: 1, lastPriceAt: null, priceSource: "PREV_CLOSE" }), false);
 });
 
 check("legacy hide= still parses for live iframes", () => {

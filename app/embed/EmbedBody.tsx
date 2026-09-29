@@ -256,6 +256,9 @@ function asOfLine(at: Date | null, sources: string[]): string {
   if (sources.includes("NAV")) notes.push("fund prices are the last published NAV");
   if (sources.includes("PREV_CLOSE")) notes.push("some prices are the previous close");
   if (sources.includes("MANUAL")) notes.push("some prices are entered by the editor");
+  if (sources.includes("STALE")) {
+    notes.push("holdings with no trade in the last few days show no current price");
+  }
 
   if (!at) return notes.length ? `Current prices: ${notes.join(" · ")}` : "Current prices not yet available.";
 

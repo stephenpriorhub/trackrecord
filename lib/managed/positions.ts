@@ -22,6 +22,7 @@
  */
 import { prisma } from "../prisma";
 import { D, dec, ZERO, fraction } from "../money";
+import { freshPrice } from "./price-freshness";
 import { buildOcc, describeOcc, normalizeUnderlying } from "../occ";
 import { classifyStructure, netCashPerUnit, type LegSpec } from "../structure";
 import { reduceLegFills, type FillLike, type LegLike } from "../pnl";
@@ -630,9 +631,10 @@ export async function recomputePosition(positionId: string) {
       // Mark ladder: a live provider price always wins. An editor-entered price
       // is the fallback, and only exists for instruments the provider cannot
       // price at all (interval and private funds have no exchange quote).
-      const live = leg.instrument.lastPrice
-        ? dec(leg.instrument.lastPrice.toString())
-        : null;
+      // A price older than STALE_AFTER_DAYS counts as no price at all — see
+      // price-freshness.ts. A months-old print must not publish a return.
+      const fresh = freshPrice(leg.instrument);
+      const live = fresh ? dec(fresh.toString()) : null;
       const manual = leg.instrument.manualPrice
         ? dec(leg.instrument.manualPrice.toString())
         : null;

@@ -21,6 +21,7 @@
 import { prisma } from "../prisma";
 import { fetchSnapshots, isMassiveConfigured } from "../massive";
 import { fetchTmxQuote, isTorontoTicker } from "./tmx";
+import { fetchHomeListingPrice, HOME_LISTINGS } from "./foreign-listings";
 import { recomputePosition } from "./positions";
 import { fetchNav, navEligible } from "./nav";
 
@@ -129,6 +130,24 @@ export async function refreshPrices(): Promise<RefreshReport> {
     ) {
       report.oldestPriceAt = row.providerAsOf;
     }
+  }
+
+  // HOME-MARKET PRICES. For an OTC line that barely trades (SSNLF), the home
+  // listing's close in dollars REPLACES Massive's print, which can be months
+  // old. See ./foreign-listings.ts.
+  for (const ticker of tickers.filter((t) => HOME_LISTINGS[t.toUpperCase()])) {
+    const quote = await fetchHomeListingPrice(ticker);
+    if (!quote) continue;
+    await prisma.marketInstrument.update({
+      where: { ticker },
+      data: {
+        lastPrice: quote.price.toDecimalPlaces(6).toString(),
+        lastPriceAt: quote.asOf,
+        priceSource: "LAST_TRADE",
+      },
+    });
+    if (!pricedTickers.has(ticker.toUpperCase())) report.priced += 1;
+    pricedTickers.add(ticker.toUpperCase());
   }
 
   // NAV FALLBACK. Only for what the primary provider could not price, so it
