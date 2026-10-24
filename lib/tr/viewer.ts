@@ -14,9 +14,9 @@ export interface Viewer {
   user: HubUser;
   canAdmin: boolean;
   /**
-   * May log trades into the sheets. Narrower than canAdmin on purpose
-   * (Stephen, 2026-10-24): super_admin and designated App Managers only — a
-   * hub admin role alone, exec_admin included, is not enough.
+   * May log and edit trades (written into the sheets). Stephen, 2026-10-24:
+   * "Admins and specified admins (kristin and jmead)" — hub admins plus the
+   * app's designated App Managers (People & access).
    */
   canLog: boolean;
 }
@@ -28,7 +28,8 @@ export async function currentViewer(): Promise<Viewer | null> {
   if (!user) return null;
   const scope = await getManageScope(user);
   const appLevel = isAppLevel(scope);
-  return { user, canAdmin: appLevel || user.role === "exec_admin", canLog: appLevel };
+  const hubAdmin = user.role === "super_admin" || user.role === "exec_admin" || user.role === "admin";
+  return { user, canAdmin: appLevel || hubAdmin, canLog: appLevel || hubAdmin };
 }
 
 /** For pages: the viewer, or a redirect to OxfordHub sign-in. */
@@ -41,7 +42,7 @@ export async function requireViewer(): Promise<Viewer> {
 /** For the trade-logging action. Throws for anyone not allowed to log. */
 export async function requireLogger(): Promise<Viewer> {
   const v = await currentViewer();
-  if (!v?.canLog) throw new Error("Only admins and the app's designated managers can log trades.");
+  if (!v?.canLog) throw new Error("Only admins and the app's designated managers can add or edit trades.");
   return v;
 }
 

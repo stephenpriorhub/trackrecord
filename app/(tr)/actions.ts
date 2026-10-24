@@ -5,7 +5,7 @@ import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import { serviceByCode } from "@/lib/tr/services";
 import { syncSheets } from "@/lib/tr/sync";
-import { LOGGABLE, logTradeToSheet, type LoggedTrade } from "@/lib/tr/sheets/write";
+import { LOGGABLE, editTradeInSheet, logTradeToSheet, type Leg, type LoggedTrade, type TradeEdit } from "@/lib/tr/sheets/write";
 import { requireAdmin, requireLogger } from "@/lib/tr/viewer";
 
 function newToken(): string {
@@ -62,13 +62,20 @@ export async function syncNow(codes?: string[]) {
   return report.map((r) => ({ code: r.code, ok: r.ok, message: r.message }));
 }
 
+export interface LegInput {
+  action: string;
+  right: string;
+  strike: string;
+  expiry: string;
+}
+
 export interface LogTradeInput {
   code: string;
   portfolio: string;
   underlying: string;
-  right: string;
-  strike: string;
-  expiry: string;
+  structure: string; // SINGLE | MULTI | PUT_SELL
+  credit: boolean;
+  legs: LegInput[];
   quantity: string;
   openDate: string;
   entryPrice: string;
@@ -76,33 +83,50 @@ export interface LogTradeInput {
   exitPrice: string;
 }
 
+type Result = { ok: true; message: string } | { ok: false; error: string };
+
+const isYmd = (s: string) => /^\d{4}-\d{2}-\d{2}$/.test(s);
+const num = (s: string | number) => Number(String(s).replace(/[$,\s]/g, ""));
+
 /**
  * Log a closed trade: write it into the service's sheet, then re-sync that
- * service so it appears at once. Super_admin and App Managers only.
+ * service so it appears at once. Admins and App Managers only.
  */
-export async function logTrade(input: LogTradeInput): Promise<{ ok: true; message: string } | { ok: false; error: string }> {
+export async function logTrade(input: LogTradeInput): Promise<Result> {
   try {
     await requireLogger();
     const def = checkCode(input.code);
     if (!(LOGGABLE as readonly string[]).includes(def.code) || !def.sheetId) {
       return { ok: false, error: `${def.name} trades can't be logged here.` };
     }
-    const isYmd = (s: string) => /^\d{4}-\d{2}-\d{2}$/.test(s);
-    const num = (s: string) => Number(String(s).replace(/[$,\s]/g, ""));
     const underlying = input.underlying.trim().toUpperCase();
-    const strike = num(input.strike);
+    if (!/^[A-Z]{1,6}$/.test(underlying)) return { ok: false, error: "Enter the ticker (letters only)." };
+    const structure = (["SINGLE", "MULTI", "PUT_SELL"] as const).find((x) => x === input.structure);
+    if (!structure) return { ok: false, error: "Choose the kind of trade." };
+
+    const legs: Leg[] = [];
+    for (const [i, l] of input.legs.entries()) {
+      const strike = num(l.strike);
+      if (l.right !== "C" && l.right !== "P") return { ok: false, error: `Leg ${i + 1}: choose call or put.` };
+      if (!(strike > 0)) return { ok: false, error: `Leg ${i + 1}: enter the strike.` };
+      if (!isYmd(l.expiry)) return { ok: false, error: `Leg ${i + 1}: enter the expiration.` };
+      legs.push({ action: l.action === "SELL" ? "SELL" : "BUY", right: l.right, strike, expiry: l.expiry });
+    }
+    if (structure === "SINGLE" && legs.length !== 1) return { ok: false, error: "A single option has one leg." };
+    if (structure === "MULTI" && legs.length < 2) return { ok: false, error: "A spread needs at least two legs." };
+    if (structure === "PUT_SELL") {
+      if (legs.length !== 1 || legs[0].right !== "P") return { ok: false, error: "A put sell is one put." };
+      legs[0].action = "SELL";
+    }
+    const credit = structure === "PUT_SELL" ? true : structure === "MULTI" ? !!input.credit : false;
+
     const quantity = num(input.quantity);
     const entryPrice = num(input.entryPrice);
     const exitPrice = num(input.exitPrice);
-    if (!/^[A-Z]{1,6}$/.test(underlying)) return { ok: false, error: "Enter the ticker (letters only)." };
-    if (input.right !== "C" && input.right !== "P") return { ok: false, error: "Choose call or put." };
-    if (!(strike > 0)) return { ok: false, error: "Enter the strike price." };
-    if (!isYmd(input.expiry) || !isYmd(input.openDate) || !isYmd(input.closeDate)) {
-      return { ok: false, error: "Enter the expiration, open and close dates." };
-    }
+    if (!isYmd(input.openDate) || !isYmd(input.closeDate)) return { ok: false, error: "Enter the open and close dates." };
     if (input.closeDate < input.openDate) return { ok: false, error: "The close date is before the open date." };
     if (!(quantity > 0)) return { ok: false, error: "Enter the number of contracts (or the weight)." };
-    if (!(entryPrice > 0)) return { ok: false, error: "Enter the price paid per contract." };
+    if (!(entryPrice > 0)) return { ok: false, error: credit ? "Enter the credit received." : "Enter the price paid." };
     if (!(exitPrice >= 0)) return { ok: false, error: "Enter the closing price (0 if it expired worthless)." };
     const portfolio = def.code === "PMK" ? (input.portfolio === "stock-flips" ? "stock-flips" : "dark-ticker") : "main";
 
@@ -111,9 +135,9 @@ export async function logTrade(input: LogTradeInput): Promise<{ ok: true; messag
       sheetId: def.sheetId,
       portfolio,
       underlying,
-      right: input.right,
-      strike,
-      expiry: input.expiry,
+      structure,
+      legs,
+      credit,
       quantity,
       openDate: input.openDate,
       entryPrice,
@@ -129,5 +153,65 @@ export async function logTrade(input: LogTradeInput): Promise<{ ok: true; messag
     };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : "Could not log the trade." };
+  }
+}
+
+export interface EditTradeInput {
+  id: string;
+  openDate: string;
+  closeDate: string;
+  entryPrice: string;
+  exitPrice: string;
+  /** Percent as typed, e.g. "25.5" for +25.5%. */
+  returnPct: string;
+}
+
+/**
+ * Edit a trade: rewrite its dates, prices and return in the sheet row it came
+ * from, then re-sync. Admins and App Managers only.
+ */
+export async function editTrade(input: EditTradeInput): Promise<Result> {
+  try {
+    await requireLogger();
+    const t = await prisma.trTrade.findUnique({ where: { id: input.id } });
+    if (!t) return { ok: false, error: "That trade is no longer in the track record — the sheet may have changed." };
+    const def = checkCode(t.serviceCode);
+    if (!def.sheetId) return { ok: false, error: "This trade isn't from a sheet." };
+
+    const entryPrice = num(input.entryPrice);
+    const exitPrice = num(input.exitPrice);
+    const returnPct = num(input.returnPct) / 100;
+    if (!isYmd(input.openDate) || !isYmd(input.closeDate)) return { ok: false, error: "Enter the open and close dates." };
+    if (input.closeDate < input.openDate) return { ok: false, error: "The close date is before the open date." };
+    if (!Number.isFinite(entryPrice) || entryPrice === 0) return { ok: false, error: "Enter the entry price." };
+    if (!Number.isFinite(exitPrice)) return { ok: false, error: "Enter the exit price." };
+    if (!Number.isFinite(returnPct)) return { ok: false, error: "Enter the return." };
+
+    // Write only what changed, so fixing a date never rewrites a price column
+    // the sheet fills on a different basis.
+    const ymd = (d: Date | null) => (d ? d.toISOString().slice(0, 10) : "");
+    const differs = (a: number | null, b: number) => a === null || Math.abs(a - b) > 1e-9;
+    const edit: TradeEdit = {};
+    if (input.openDate !== ymd(t.openDate)) edit.openDate = input.openDate;
+    if (input.closeDate !== ymd(t.closeDate)) edit.closeDate = input.closeDate;
+    if (differs(t.entryPrice, entryPrice)) edit.entryPrice = entryPrice;
+    if (differs(t.exitPrice, exitPrice)) edit.exitPrice = exitPrice;
+    if (differs(t.returnPct, returnPct) && Math.abs((t.returnPct ?? 0) - returnPct) > 5e-7) edit.returnPct = returnPct;
+    if (Object.keys(edit).length === 0) return { ok: true, message: "Nothing changed." };
+
+    await editTradeInSheet({
+      code: def.code,
+      sheetId: def.sheetId,
+      tab: t.sheetTab,
+      row: t.sheetRow,
+      expect: { openDate: t.openDate.toISOString().slice(0, 10), returnPct: t.returnPct },
+      edit,
+    });
+    await syncSheets([def.code]);
+    revalidatePath(`/s/${def.slug}`);
+    revalidatePath("/");
+    return { ok: true, message: `Updated ${t.sheetTab}, row ${t.sheetRow} in ${def.name}'s sheet.` };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "Could not update the trade." };
   }
 }

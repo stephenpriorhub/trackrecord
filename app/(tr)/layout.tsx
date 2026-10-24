@@ -36,7 +36,6 @@ export default async function TrackRecordLayout({ children }: { children: React.
         ...(viewer.canLog ? [{ href: "/log", label: "Log a trade" }] : []),
         { href: "/status", label: "Sheet sync & data checks" },
         { href: "/embeds", label: "Widgets" },
-        { href: "/manage", label: "Portfolio Manager" },
       ]
     : [];
 

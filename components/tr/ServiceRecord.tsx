@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { StatsTable } from "./StatsTable";
 import { TradeFilters } from "./TradeFilters";
+import { EditTradeButton } from "./EditTradeButton";
 import { chipTone, days, fmtDate, int, pct, price, signedPct, tone } from "@/lib/tr/format";
 import {
   PAGE_SIZE,
@@ -18,6 +19,8 @@ export interface RecordFlags {
   /** Signed-in view: Airtable links + flags. Public pages never show them. */
   internal: boolean;
   showBenchmark: boolean;
+  /** Admins and App Managers: an Edit button per trade. */
+  canEdit?: boolean;
 }
 
 const PERIODS: PeriodKey[] = ["week", "month", "year", "inception"];
@@ -204,6 +207,7 @@ function TradeTable({
             <th className="px-3 py-2.5 text-right font-medium">Return</th>
             {flags.showBenchmark && <th className="px-3 py-2.5 text-right font-medium">S&amp;P same days</th>}
             {flags.internal && <th className="px-3 py-2.5 text-right font-medium">Airtable</th>}
+            {flags.canEdit && <th className="px-3 py-2.5" />}
           </tr>
         </thead>
         <tbody className="bg-card">
@@ -266,12 +270,31 @@ function TradeTable({
                     )}
                   </td>
                 )}
+                {flags.canEdit && (
+                  <td className="px-2 py-2.5 text-right">
+                    <EditTradeButton
+                      trade={{
+                        id: r.id,
+                        name: r.name,
+                        openDate: r.openDate.toISOString().slice(0, 10),
+                        closeDate: r.closeDate ? r.closeDate.toISOString().slice(0, 10) : null,
+                        entryPrice: r.entryPrice,
+                        exitPrice: r.exitPrice,
+                        returnPct: r.returnPct,
+                        credit: r.side === "SHORT",
+                        returnFromSheet: def.code === "PMK",
+                        sheetTab: r.sheetTab,
+                        sheetRow: r.sheetRow,
+                      }}
+                    />
+                  </td>
+                )}
               </tr>
             );
           })}
           {rows.length === 0 && (
             <tr>
-              <td colSpan={8} className="px-3 py-10 text-center text-muted">
+              <td colSpan={9} className="px-3 py-10 text-center text-muted">
                 No trades match these filters.
               </td>
             </tr>

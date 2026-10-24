@@ -53,7 +53,7 @@ export default async function ServicePage({
           filters={data.filters}
           params={flatParams(sp)}
           basePath={`/s/${def.slug}`}
-          flags={{ internal: true, showBenchmark: true }}
+          flags={{ internal: true, showBenchmark: true, canEdit: viewer.canLog }}
           period={breakdownPeriod(sp)}
           updatedAt={data.settings?.lastSyncedAt ?? null}
         />

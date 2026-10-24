@@ -12,7 +12,7 @@
  */
 import type { Workbook } from "./workbook";
 import { num, txt, ymd } from "./workbook";
-import { type ParseResult, describe, fmtStrike, parseSheetOcc } from "./types";
+import { type ParseResult, type Structure, describe, fmtStrike, parseSheetOcc } from "./types";
 
 const TAB = "Since Inception";
 const FLIPS = "Stock Flips";
@@ -42,24 +42,36 @@ export function parsePostMarket(wb: Workbook): ParseResult {
       out.skipped.push({ tab: TAB, row: n, symbol, reason: "no open date" });
       return;
     }
-    const o = parseSheetOcc(symbol);
-    const base = o
-      ? {
-          underlying: o.underlying,
-          assetType: "OPTION" as const,
-          structure: "SINGLE" as const,
-          optionType: o.right,
-          strike: fmtStrike(o.strike),
-          expiry: o.expiry,
-        }
-      : {
-          underlying: symbol,
-          assetType: "STOCK" as const,
-          structure: "STOCK" as const,
-          optionType: null,
-          strike: null,
-          expiry: null,
-        };
+    // One contract, or several comma-separated (a spread logged from the app).
+    // A name starting "SOLD" was opened for a credit.
+    const legs = symbol.split(/[,\s]+/).filter(Boolean).map(parseSheetOcc);
+    const sold = /^SOLD\b/i.test(txt(r[C.name]));
+    let base;
+    if (legs.length > 0 && legs.every(Boolean)) {
+      const o = legs as NonNullable<(typeof legs)[number]>[];
+      const rights = new Set(o.map((x) => x.right));
+      const structure: Structure =
+        o.length === 1 ? (sold && o[0].right === "PUT" ? "PUT_SELL" : "SINGLE")
+        : rights.size > 1 && o.length === 2 ? "STRANGLE"
+        : o.length >= 3 ? "BUTTERFLY" : "SPREAD";
+      base = {
+        underlying: o[0].underlying,
+        assetType: "OPTION" as const,
+        structure,
+        optionType: rights.size === 1 ? o[0].right : null,
+        strike: [...new Set(o.map((x) => fmtStrike(x.strike)))].join(" / "),
+        expiry: o[0].expiry,
+      };
+    } else {
+      base = {
+        underlying: symbol,
+        assetType: "STOCK" as const,
+        structure: "STOCK" as const,
+        optionType: null,
+        strike: null,
+        expiry: null,
+      };
+    }
     out.trades.push({
       serviceCode: "PMK",
       tab: TAB,
@@ -69,7 +81,7 @@ export function parsePostMarket(wb: Workbook): ParseResult {
       name: symbol ? describe(base) : txt(r[C.name]),
       symbol: symbol || txt(r[C.name]),
       ...base,
-      side: "LONG",
+      side: sold ? "SHORT" : "LONG",
       status: "CLOSED",
       openDate: open,
       closeDate: ymd(r[C.close]),
