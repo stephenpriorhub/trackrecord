@@ -2,7 +2,7 @@ import Link from "next/link";
 import { MarketStrip } from "@/components/tr/MarketStrip";
 import { ServiceCard, type CardView } from "@/components/tr/ServiceCard";
 import { fmtDate, int, pct, signedPct, tone } from "@/lib/tr/format";
-import { longTermSummary } from "@/lib/tr/longterm";
+import { longTermBooks, summariseBooks } from "@/lib/tr/longterm";
 import { marketStrip } from "@/lib/tr/market";
 import { allPublicationInfo } from "@/lib/tr/publications";
 import { loadSummaryTrades, summarise, weekAcrossServices } from "@/lib/tr/queries";
@@ -21,7 +21,7 @@ export default async function Home() {
     marketStrip(today),
     allPublicationInfo(SERVICES.map((s) => s.code)),
     loadSummaryTrades(SHEET_SERVICES.map((s) => s.code)),
-    Promise.all(longTerm.map((s) => longTermSummary(s))),
+    Promise.all(longTerm.map(async (s) => summariseBooks(await longTermBooks(s, false)))),
   ]);
   const week = weekAcrossServices(byCode, today);
   const wk = periodBounds("week", today);
@@ -123,7 +123,7 @@ export default async function Home() {
           Matt McCall&apos;s research services hold positions for the long run, so they&apos;re summarised as portfolios
           rather than trades.
         </p>
-        <div className="grid gap-4 md:grid-cols-3">
+        <div className="grid gap-4 md:grid-cols-2">
           {longTerm.map((def, i) => {
             const s = lt[i];
             const logo = info[def.code]?.logoUrl;
@@ -140,25 +140,27 @@ export default async function Home() {
                   <h3 className="text-lg font-semibold leading-tight">{def.name}</h3>
                 )}
                 <p className="mt-1 text-sm text-muted">{def.gurus.join(" & ")}</p>
-                {s.positions > 0 ? (
-                  <dl className="num mt-4 grid grid-cols-2 gap-3 text-sm">
-                    <div>
-                      <dt className="text-xs text-muted">Open positions</dt>
-                      <dd className="font-semibold">{int(s.open)}</dd>
-                    </div>
-                    <div>
-                      <dt className="text-xs text-muted">Avg. return</dt>
-                      <dd className={`font-semibold ${tone(s.avgReturn)}`}>{signedPct(s.avgReturn)}</dd>
-                    </div>
-                    <div>
-                      <dt className="text-xs text-muted">Positions up</dt>
-                      <dd className="font-semibold">{pct(s.winRate, 0)}</dd>
-                    </div>
-                    <div>
-                      <dt className="text-xs text-muted">S&amp;P 500, same span</dt>
-                      <dd className={`font-semibold ${tone(s.spx)}`}>{signedPct(s.spx)}</dd>
-                    </div>
-                  </dl>
+                {s.some((b) => b.open + b.closed > 0) ? (
+                  <table className="num mt-4 w-full text-sm">
+                    <thead>
+                      <tr className="text-left text-xs text-muted">
+                        <th className="pb-1 font-medium">Portfolio</th>
+                        <th className="pb-1 text-right font-medium">Positions</th>
+                        <th className="pb-1 text-right font-medium">Total return</th>
+                        <th className="pb-1 text-right font-medium">S&amp;P 500</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {s.map((b) => (
+                        <tr key={b.key} className="border-t border-line">
+                          <td className="py-1.5 font-medium">{b.label}</td>
+                          <td className="py-1.5 text-right text-muted">{int(b.open + b.closed)}</td>
+                          <td className={`py-1.5 text-right font-semibold ${tone(b.totalReturn)}`}>{signedPct(b.totalReturn)}</td>
+                          <td className={`py-1.5 text-right ${tone(b.spx)}`}>{signedPct(b.spx)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
                 ) : (
                   <p className="mt-4 text-sm text-muted">No positions published yet.</p>
                 )}

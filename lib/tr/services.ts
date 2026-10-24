@@ -19,6 +19,22 @@ export interface SubPortfolioDef {
   inHeadline: boolean;
 }
 
+/**
+ * A long-term service's separately tracked portfolio. Each book has its own
+ * return and S&P comparison and is never totalled with the others.
+ */
+export interface BookDef {
+  key: string;
+  label: string;
+  description?: string;
+  /** Portfolio Manager portfolio slugs in this book. */
+  slugs?: string[];
+  /** Every portfolio not claimed by another book — new themes land here. */
+  rest?: boolean;
+  /** Whole Portfolio Manager services folded into this book (by pubCode). */
+  pubCodes?: string[];
+}
+
 export interface ServiceDef {
   code: string;
   slug: string;
@@ -29,6 +45,8 @@ export interface ServiceDef {
   sheetId?: string;
   /** Portfolio Manager pubCode for long-term services. */
   managedPubCode?: string;
+  /** Long-term services: separately tracked books, in display order. */
+  books?: BookDef[];
   /** Sub-portfolios in display order. A service with one book has none listed. */
   subPortfolios: SubPortfolioDef[];
   /**
@@ -124,17 +142,26 @@ export const SERVICES: ServiceDef[] = [
     gurus: ["Matt McCall"],
     managedPubCode: "XAI",
     subPortfolios: [],
+    // Stephen, 2026-10-24: three portfolios, each tracked completely
+    // separately. Pro (formerly its own service, XM2) lives here; the LEAP
+    // options trade is part of Pro.
+    books: [
+      {
+        key: "core",
+        label: "Core Portfolio",
+        description: "Matt's innovation themes, each tracked as its own group.",
+        rest: true,
+      },
+      { key: "disruptor-25", label: "Disruptor 25", slugs: ["disruptor-25-portfolio"] },
+      {
+        key: "pro",
+        label: "Pro Portfolio",
+        description: "McCall Innovation Report Pro, including the long-term options (LEAP) plays.",
+        slugs: ["bonus-leap-options-trade"],
+        pubCodes: ["XM2"],
+      },
+    ],
     sortOrder: 6,
-  },
-  {
-    code: "XM2",
-    slug: "mccall-innovation-report-pro",
-    name: "The McCall Innovation Report Pro",
-    kind: "INVESTING",
-    gurus: ["Matt McCall"],
-    managedPubCode: "XM2",
-    subPortfolios: [],
-    sortOrder: 7,
   },
   {
     code: "SAT",
@@ -144,7 +171,7 @@ export const SERVICES: ServiceDef[] = [
     gurus: ["Matt McCall"],
     managedPubCode: "SAT",
     subPortfolios: [],
-    sortOrder: 8,
+    sortOrder: 7,
   },
 ];
 

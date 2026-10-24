@@ -3,7 +3,7 @@
  * and the public read-only page (/t/[token]) — one loader so they can't drift.
  */
 import { prisma } from "../prisma";
-import { longTermView } from "./longterm";
+import { longTermBooks } from "./longterm";
 import { publicationInfo } from "./publications";
 import { listTrades, loadSummaryTrades, parseFilters, summarise } from "./queries";
 import type { ServiceDef } from "./services";
@@ -27,7 +27,7 @@ export async function loadServicePage(def: ServiceDef, sp: SearchParams, publicO
   ]);
 
   if (!def.sheetId) {
-    return { kind: "longterm" as const, info, settings, view: await longTermView(def, publicOnly) };
+    return { kind: "longterm" as const, info, settings, books: await longTermBooks(def, publicOnly) };
   }
 
   const filters = parseFilters(sp);

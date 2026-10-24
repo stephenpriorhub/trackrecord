@@ -43,7 +43,7 @@ export default async function PublicServicePage({
     <div className="space-y-6">
       <ServiceHeader info={data.info} kindLabel={KIND_LABEL[def.kind]} gurus={def.gurus} />
       {data.kind === "longterm" ? (
-        <LongTermRecord view={data.view} showBenchmark={row.publicShowBenchmark} />
+        <LongTermRecord books={data.books} showBenchmark={row.publicShowBenchmark} />
       ) : (
         <ServiceRecord
           def={def}
