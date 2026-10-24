@@ -26,6 +26,12 @@ interface CatalogEntry {
 }
 
 
+/**
+ * Logos served from this app, used ahead of the catalog's. The catalog's McCall
+ * Innovation Report logo sits behind the wiki's sign-in (401 for readers).
+ */
+const LOCAL_LOGOS: Record<string, string> = { XAI: "/logos/xai.svg" };
+
 let cache: { at: number; entries: CatalogEntry[] } | null = null;
 const logoOk = new Map<string, { at: number; ok: boolean }>();
 
@@ -66,7 +72,7 @@ export async function publicationInfo(code: string): Promise<PublicationInfo> {
   const entries = await catalog();
   const find = (c: string) => entries.find((e) => e.code?.toUpperCase() === c);
   const e = find(code);
-  const logo = e?.logoUrl && (await reachable(e.logoUrl)) ? e.logoUrl : null;
+  const logo = LOCAL_LOGOS[code] ?? (e?.logoUrl && (await reachable(e.logoUrl)) ? e.logoUrl : null);
   return {
     name: def?.name ?? e?.name ?? code,
     logoUrl: logo,
