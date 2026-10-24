@@ -30,7 +30,7 @@ interface CatalogEntry {
  * Logos served from this app, used ahead of the catalog's. The catalog's McCall
  * Innovation Report logo sits behind the wiki's sign-in (401 for readers).
  */
-const LOCAL_LOGOS: Record<string, string> = { XAI: "/logos/xai.svg" };
+const LOCAL_LOGOS: Record<string, string> = { XAI: "/logos/xai.svg", SAT: "/logos/sat.svg" };
 
 let cache: { at: number; entries: CatalogEntry[] } | null = null;
 const logoOk = new Map<string, { at: number; ok: boolean }>();
