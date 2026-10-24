@@ -42,7 +42,7 @@ export default async function ServicePage({
 
   return (
     <div className="space-y-6">
-      <ServiceHeader info={data.info} kindLabel={KIND_LABEL[def.kind]} gurus={def.gurus} extra={share} />
+      <ServiceHeader info={data.info} kindLabel={KIND_LABEL[def.kind]} gurus={def.gurus} extra={share} wikiLink />
       {data.kind === "longterm" ? (
         <LongTermRecord books={data.books} showBenchmark />
       ) : (

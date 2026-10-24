@@ -11,12 +11,13 @@ export function MarketStrip({ rows, asOf }: { rows: MarketRow[]; asOf: Date | nu
               <p className="font-semibold text-ink">{m.label}</p>
               <p className="num text-sm text-muted">{m.last !== null ? `$${m.last.toFixed(2)}` : "—"}</p>
             </div>
-            <dl className="num mt-2 grid grid-cols-3 gap-2 text-sm">
+            <dl className="num mt-2 grid grid-cols-4 gap-2 text-sm">
               {(
                 [
                   ["Today", m.day],
                   ["Week to date", m.week],
                   ["Month to date", m.month],
+                  ["Year to date", m.year],
                 ] as const
               ).map(([label, v]) => (
                 <div key={label}>

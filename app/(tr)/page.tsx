@@ -33,8 +33,7 @@ export default async function Home() {
         <p className="text-sm text-muted">{fmtDate(today)}</p>
         <h1 className="text-2xl font-bold tracking-tight text-ink sm:text-3xl">MTA Track Record</h1>
         <p className="mt-1 max-w-2xl text-sm text-muted">
-          Every closed trade from every MTA service, straight from each service&apos;s published spreadsheet. Pick a
-          service to see each trade.
+          Every closed trade from every MTA service. Pick a service to see each trade.
         </p>
       </header>
 
@@ -112,6 +111,7 @@ export default async function Home() {
               views={views}
               weighted={!!def.weighted}
               note={note}
+              wikiUrl={info[def.code]?.wikiUrl}
             />
           );
         })}
@@ -123,7 +123,7 @@ export default async function Home() {
           Matt McCall&apos;s research services hold positions for the long run, so they&apos;re summarised as portfolios
           rather than trades.
         </p>
-        <div className="grid gap-4 md:grid-cols-2">
+        <div className="grid gap-4 lg:grid-cols-2">
           {longTerm.map((def, i) => {
             const s = lt[i];
             const logo = info[def.code]?.logoUrl;
@@ -145,8 +145,9 @@ export default async function Home() {
                     <thead>
                       <tr className="text-left text-xs text-muted">
                         <th className="pb-1 font-medium">Portfolio</th>
-                        <th className="pb-1 text-right font-medium">Positions</th>
-                        <th className="pb-1 text-right font-medium">Total return</th>
+                        <th className="pb-1 text-right font-medium">Total</th>
+                        <th className="pb-1 text-right font-medium">Realized</th>
+                        <th className="pb-1 text-right font-medium">Unrealized</th>
                         <th className="pb-1 text-right font-medium">S&amp;P 500</th>
                       </tr>
                     </thead>
@@ -154,8 +155,9 @@ export default async function Home() {
                       {s.map((b) => (
                         <tr key={b.key} className="border-t border-line">
                           <td className="py-1.5 font-medium">{b.label}</td>
-                          <td className="py-1.5 text-right text-muted">{int(b.open + b.closed)}</td>
                           <td className={`py-1.5 text-right font-semibold ${tone(b.totalReturn)}`}>{signedPct(b.totalReturn)}</td>
+                          <td className={`py-1.5 text-right ${tone(b.realized)}`}>{signedPct(b.realized)}</td>
+                          <td className={`py-1.5 text-right ${tone(b.unrealized)}`}>{signedPct(b.unrealized)}</td>
                           <td className={`py-1.5 text-right ${tone(b.spx)}`}>{signedPct(b.spx)}</td>
                         </tr>
                       ))}

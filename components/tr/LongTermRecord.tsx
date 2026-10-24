@@ -1,6 +1,7 @@
 import { chipTone, fmtDate, int, price, signedPct, tone } from "@/lib/tr/format";
 import type { EmbedBlock, EmbedRow } from "@/lib/managed/embed";
 import type { LongTermBook } from "@/lib/tr/longterm";
+import { splitReturns } from "@/lib/tr/longterm-math";
 
 const n = (d: { toNumber(): number } | null | undefined) => (d ? d.toNumber() : null);
 
@@ -44,6 +45,46 @@ function Rows({ rows, closed, showBenchmark }: { rows: EmbedRow[]; closed: boole
   );
 }
 
+function ReturnFigures({
+  total,
+  split,
+  spx,
+  spxFrom,
+  large = false,
+}: {
+  total: number | null;
+  split: ReturnType<typeof splitReturns>;
+  /** undefined = don't show the benchmark at all. */
+  spx?: number | null;
+  spxFrom?: Date | null;
+  large?: boolean;
+}) {
+  const big = large ? "text-2xl font-bold" : "text-xl font-semibold";
+  const small = large ? "text-lg font-semibold" : "text-base font-semibold";
+  return (
+    <dl className="num flex flex-wrap items-end gap-x-6 gap-y-3 text-right">
+      <div>
+        <dt className="text-xs font-medium text-ink">Total return</dt>
+        <dd className={`${big} ${tone(total)}`}>{signedPct(total)}</dd>
+      </div>
+      <div>
+        <dt className="text-xs text-muted">Realized · {int(split.realizedCount)} closed</dt>
+        <dd className={`${small} ${tone(split.realized)}`}>{signedPct(split.realized)}</dd>
+      </div>
+      <div>
+        <dt className="text-xs text-muted">Unrealized · {int(split.unrealizedCount)} open</dt>
+        <dd className={`${small} ${tone(split.unrealized)}`}>{signedPct(split.unrealized)}</dd>
+      </div>
+      {spx !== undefined && (
+        <div className="border-l border-line pl-6">
+          <dt className="text-xs text-muted">S&amp;P 500{spxFrom && <> since {fmtDate(spxFrom)}</>}</dt>
+          <dd className={`${small} ${tone(spx)}`}>{signedPct(spx)}</dd>
+        </div>
+      )}
+    </dl>
+  );
+}
+
 function Block({ block, showBenchmark, bare = false }: { block: EmbedBlock; showBenchmark: boolean; bare?: boolean }) {
   const pr = n(block.portfolioReturn);
   const br = n(block.benchmarkReturn);
@@ -55,21 +96,12 @@ function Block({ block, showBenchmark, bare = false }: { block: EmbedBlock; show
           <h3 className="text-lg font-semibold">{block.title}</h3>
           {block.description && <p className="mt-0.5 max-w-2xl text-sm text-muted">{block.description}</p>}
         </div>
-        <dl className="num flex gap-6 text-right">
-          <div>
-            <dt className="text-xs text-muted">Total return</dt>
-            <dd className={`text-xl font-semibold ${tone(pr)}`}>{signedPct(pr)}</dd>
-          </div>
-          {showBenchmark && block.showBenchmark && (
-            <div>
-              <dt className="text-xs text-muted">
-                {block.benchmarkName}
-                {block.benchmarkFrom && <> since {fmtDate(block.benchmarkFrom)}</>}
-              </dt>
-              <dd className={`text-xl font-semibold ${tone(br)}`}>{signedPct(br)}</dd>
-            </div>
-          )}
-        </dl>
+        <ReturnFigures
+          total={pr}
+          split={splitReturns([block])}
+          spx={showBenchmark && block.showBenchmark ? br : undefined}
+          spxFrom={block.benchmarkFrom}
+        />
       </header>
       )}
       <div className="px-2 py-3">
@@ -91,8 +123,6 @@ function Block({ block, showBenchmark, bare = false }: { block: EmbedBlock; show
 function BookSection({ book, showBenchmark }: { book: LongTermBook; showBenchmark: boolean }) {
   const v = book.views[0];
   const blocks = book.views.flatMap((x) => (x.groups.length ? x.groups : [x]));
-  const open = blocks.reduce((a, g) => a + g.open.length, 0);
-  const closed = blocks.reduce((a, g) => a + g.closedTotal, 0);
   const tr = n(v?.portfolioReturn);
   const br = n(v?.benchmarkReturn);
   return (
@@ -104,33 +134,20 @@ function BookSection({ book, showBenchmark }: { book: LongTermBook; showBenchmar
             {book.description && <p className="mt-0.5 max-w-xl text-sm text-muted">{book.description}</p>}
           </div>
           {v && (
-            <dl className="num flex flex-wrap gap-6 text-right">
-              <div>
-                <dt className="text-xs text-muted">Total return · all positions</dt>
-                <dd className={`text-2xl font-bold ${tone(tr)}`}>{signedPct(tr)}</dd>
-              </div>
-              {showBenchmark && (
-                <div>
-                  <dt className="text-xs text-muted">
-                    S&amp;P 500{v.benchmarkFrom && <> since {fmtDate(v.benchmarkFrom)}</>}
-                  </dt>
-                  <dd className={`text-2xl font-bold ${tone(br)}`}>{signedPct(br)}</dd>
-                </div>
-              )}
-              <div>
-                <dt className="text-xs text-muted">Positions</dt>
-                <dd className="text-2xl font-bold text-ink">
-                  {int(open)} <span className="text-sm font-medium text-muted">open</span> · {int(closed)}{" "}
-                  <span className="text-sm font-medium text-muted">closed</span>
-                </dd>
-              </div>
-            </dl>
+            <ReturnFigures
+              total={tr}
+              split={splitReturns(blocks)}
+              spx={showBenchmark ? br : undefined}
+              spxFrom={v.benchmarkFrom}
+              large
+            />
           )}
         </div>
         {v ? (
           <p className="mt-3 text-xs text-faint">
-            Each position counts equally. Closed positions count at their exit price and open ones at the latest
-            price, so this is the return on everything the portfolio has recommended.
+            Each position counts equally. Total return covers everything the portfolio has recommended; realized
+            is the positions already closed, at their exit prices; unrealized is the positions still held, at the
+            latest price.
           </p>
         ) : (
           <p className="mt-3 text-sm text-muted">No positions published yet.</p>

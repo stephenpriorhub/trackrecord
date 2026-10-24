@@ -14,6 +14,7 @@
  */
 import { prisma } from "../prisma";
 import { loadServiceEmbed, parseEmbedOptions, type EmbedView } from "../managed/embed";
+import { splitReturns } from "./longterm-math";
 import type { BookDef, ServiceDef } from "./services";
 
 export interface LongTermBook {
@@ -30,6 +31,8 @@ export interface BookSummary {
   open: number;
   closed: number;
   totalReturn: number | null;
+  realized: number | null;
+  unrealized: number | null;
   spx: number | null;
   since: Date | null;
 }
@@ -89,13 +92,16 @@ const num = (d: { toNumber(): number } | null | undefined) => (d ? d.toNumber() 
 export function summariseBooks(books: LongTermBook[]): BookSummary[] {
   return books.map((b) => {
     const v = b.views[0];
-    const blocks = v ? (v.groups.length ? v.groups : [v]) : [];
+    const blocks = b.views.flatMap((x) => (x.groups.length ? x.groups : [x]));
+    const split = splitReturns(blocks);
     return {
       key: b.key,
       label: b.label,
       open: blocks.reduce((a, g) => a + g.open.length, 0),
       closed: blocks.reduce((a, g) => a + g.closedTotal, 0),
       totalReturn: num(v?.portfolioReturn),
+      realized: split.realized,
+      unrealized: split.unrealized,
       spx: num(v?.benchmarkReturn),
       since: v?.benchmarkFrom ?? null,
     };

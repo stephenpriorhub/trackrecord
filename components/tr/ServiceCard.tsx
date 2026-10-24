@@ -25,6 +25,7 @@ export function ServiceCard({
   views,
   weighted,
   note,
+  wikiUrl,
 }: {
   name: string;
   href: string;
@@ -33,6 +34,7 @@ export function ServiceCard({
   views: CardView[];
   weighted: boolean;
   note?: string;
+  wikiUrl?: string | null;
 }) {
   const [active, setActive] = useState(views[0].key);
   const view = views.find((v) => v.key === active) ?? views[0];
@@ -48,7 +50,17 @@ export function ServiceCard({
           ) : (
             <h2 className="text-lg font-semibold leading-tight text-ink">{name}</h2>
           )}
-          <p className="mt-1 text-sm text-muted">{gurus.join(" & ")}</p>
+          <p className="mt-1 text-sm text-muted">
+            {gurus.join(" & ")}
+            {wikiUrl && (
+              <>
+                {" · "}
+                <a href={wikiUrl} target="_blank" rel="noreferrer" className="text-brand hover:underline">
+                  MTA Wiki ↗
+                </a>
+              </>
+            )}
+          </p>
         </div>
         {views.length > 1 && (
           <div className="flex rounded-lg border border-line bg-paper p-0.5 text-xs" role="tablist">

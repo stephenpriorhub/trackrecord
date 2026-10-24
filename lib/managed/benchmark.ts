@@ -166,14 +166,24 @@ export async function warmBenchmarkRange(
   const key = process.env.MASSIVE_API_KEY;
   if (!key) return 0;
 
-  const newest = await prisma.benchmarkClose.findFirst({
-    where: { ticker, date: { gte: from, lte: to } },
-    orderBy: { date: "desc" },
-    select: { date: true },
-  });
-  const start = newest
-    ? new Date(Math.max(newest.date.getTime(), from.getTime()))
-    : from;
+  const [newest, cached] = await Promise.all([
+    prisma.benchmarkClose.findFirst({
+      where: { ticker, date: { gte: from, lte: to } },
+      orderBy: { date: "desc" },
+      select: { date: true },
+    }),
+    prisma.benchmarkClose.count({ where: { ticker, date: { gte: from, lte: to } } }),
+  ]);
+  // Only fetch forward from the newest bar when the cache is actually DENSE.
+  // Single-day lookups (benchmarkCloseOn) leave isolated rows scattered across
+  // years; trusting the newest one then skipped every gap behind it, and
+  // `on(date)` silently returned a close from months earlier. Found 2026-10-24:
+  // 82 SPY rows spanning 2019-2026, so most trades' S&P figures were wrong.
+  // ~252 sessions a year; allow slack for holidays and a short window.
+  const expected = ((to.getTime() - from.getTime()) / 86_400_000) * (252 / 365);
+  const dense = cached >= expected * 0.95 - 5;
+  const start =
+    newest && dense ? new Date(Math.max(newest.date.getTime(), from.getTime())) : from;
   if (start > to) return 0;
 
   try {

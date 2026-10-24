@@ -7,11 +7,14 @@ export function ServiceHeader({
   kindLabel,
   gurus,
   extra,
+  wikiLink = false,
 }: {
   info: PublicationInfo;
   kindLabel: string;
   gurus: string[];
   extra?: React.ReactNode;
+  /** Signed-in pages only: the wiki needs an OxfordHub login. */
+  wikiLink?: boolean;
 }) {
   const [lead, ...rest] = info.body;
   return (
@@ -42,6 +45,16 @@ export function ServiceHeader({
               ))}
             </div>
           </details>
+        )}
+        {wikiLink && info.wikiUrl && (
+          <a
+            href={info.wikiUrl}
+            target="_blank"
+            rel="noreferrer"
+            className="mt-3 inline-flex items-center gap-1.5 rounded-lg border border-line bg-paper px-3 py-1.5 text-sm font-medium text-brand hover:border-brand"
+          >
+            Full profile in the MTA Wiki ↗
+          </a>
         )}
       </div>
     </header>
