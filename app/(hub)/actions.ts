@@ -72,7 +72,7 @@ export async function createPortfolioAction(form: FormData): Promise<ActionResul
     after: { name: portfolio.name, slug: portfolio.slug },
   });
 
-  revalidatePath("/");
+  revalidatePath("/manage");
   return { ok: true, message: `Created "${portfolio.name}".` };
 }
 
@@ -148,7 +148,7 @@ export async function updatePortfolioAction(form: FormData): Promise<ActionResul
     summary: before.name !== after.name ? `Renamed from "${before.name}"` : undefined,
   });
 
-  revalidatePath("/");
+  revalidatePath("/manage");
   revalidatePath(`/portfolio/${id}`);
   return { ok: true, message: "Saved." };
 }
@@ -182,7 +182,7 @@ export async function archivePortfolioAction(form: FormData): Promise<ActionResu
     before: { archivedAt: before.archivedAt },
   });
 
-  revalidatePath("/");
+  revalidatePath("/manage");
   return { ok: true, message: restore ? "Restored." : `Archived "${before.name}".` };
 }
 
@@ -224,7 +224,7 @@ export async function reorderPortfolioAction(form: FormData): Promise<ActionResu
     actor: user,
   });
 
-  revalidatePath("/");
+  revalidatePath("/manage");
   return { ok: true };
 }
 
@@ -249,7 +249,7 @@ export async function createServiceAction(form: FormData): Promise<ActionResult>
     after: { pubCode: service.pubCode, name: service.name },
   });
 
-  revalidatePath("/");
+  revalidatePath("/manage");
   return { ok: true, message: `Created "${service.name}".` };
 }
 
@@ -826,7 +826,7 @@ export async function airtableSyncAction(
   const job = startSyncJob(pub.pubCode, apply, () => {
     try {
       revalidatePath(`/publication/${pub.slug}`);
-      revalidatePath("/");
+      revalidatePath("/manage");
     } catch {
       // Outside a request there may be nothing to revalidate; the page reloads anyway.
     }
@@ -959,7 +959,7 @@ export async function setPortfolioVisibilityAction(
     after: { visibility },
     summary: makePublic ? "Published from the Embeds page" : "Unpublished from the Embeds page",
   });
-  revalidatePath("/");
+  revalidatePath("/manage");
   revalidatePath("/embeds");
   revalidatePath(`/portfolio/${before.id}`);
   return { ok: true, message: makePublic ? "Published." : "Unpublished." };

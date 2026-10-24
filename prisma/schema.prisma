@@ -677,3 +677,67 @@ model SavedEmbed {
 
   @@index([serviceId, deletedAt])
 }
+
+// ---------------------------------------------------------------------------
+// Track Record v2 — sheet-fed trades (lib/tr). Service definitions live in
+// lib/tr/services.ts; these tables hold the synced trades and what admins set.
+// ---------------------------------------------------------------------------
+
+/// Per-service settings an admin edits, and the last sync's outcome.
+model TrService {
+  code                String    @id
+  /// Public read-only page at /t/<publicToken>. Null = no public link.
+  publicToken         String?   @unique
+  publicEnabled       Boolean   @default(false)
+  /// Public page shows the S&P 500 comparison.
+  publicShowBenchmark Boolean   @default(true)
+  lastSyncedAt        DateTime?
+  lastSyncOk          Boolean?
+  lastSyncMessage     String?   @db.Text
+  /// JSON: sheet rows that need an editor's attention (cross-labelled, pending, skipped).
+  lastSyncIssues      Json?
+  updatedAt           DateTime  @updatedAt
+}
+
+/// One trade, as the service's Google Sheet records it. Replaced wholesale on
+/// every sync — the sheet is the record, this is a copy of it.
+model TrTrade {
+  id             String    @id @default(cuid())
+  serviceCode    String
+  /// Stable while the sheet row is unchanged: service|tab|symbol|dates|return|n.
+  sourceKey      String    @unique
+  sheetTab       String
+  sheetRow       Int
+  portfolio      String
+  guru           String?
+  name           String
+  symbol         String
+  underlying     String
+  assetType      String
+  structure      String
+  optionType     String?
+  strike         String?
+  expiry         DateTime? @db.Date
+  side           String
+  status         String
+  openDate       DateTime  @db.Date
+  closeDate      DateTime? @db.Date
+  closeAfterBell Boolean   @default(false)
+  entryPrice     Float?
+  exitPrice      Float?
+  /// Fraction, verbatim from the sheet (0.25 = +25%).
+  returnPct      Float?
+  weight         Float     @default(1)
+  premiumCapture Float?
+  holdDays       Int?
+  notes          String?
+  /// Airtable Portfolio Tracker position, when one matches.
+  airtableId     String?
+  /// S&P 500 (SPY) close-to-close over the same open->close window.
+  spxReturnPct   Float?
+  createdAt      DateTime  @default(now())
+
+  @@index([serviceCode, closeDate])
+  @@index([serviceCode, openDate])
+  @@index([underlying])
+}

@@ -1,0 +1,56 @@
+# Re-reads every service's track-record Google Sheet into the app
+# (lib/tr/sync.ts). The sheets are the record; this keeps the track record
+# pages within ~15 minutes of them.
+#
+# Same pattern as refresh-prices.yml: one authenticated call to the running app,
+# scheduled from GitHub so no Railway service is needed.
+name: Sync track-record sheets
+
+on:
+  schedule:
+    # Every 15 minutes, 12:00-23:45 UTC Mon-Fri — the trading day plus the
+    # evening, when expirations and the day's closes are entered.
+    - cron: "*/15 12-23 * * 1-5"
+    # Every 3 hours otherwise (overnight and weekends), for late edits.
+    - cron: "0 0-11/3 * * 1-5"
+    - cron: "0 */3 * * 0,6"
+  workflow_dispatch:
+    inputs:
+      codes:
+        description: "Only these services (comma-separated, e.g. WAR,DPL). Blank = all."
+        required: false
+        default: ""
+
+concurrency:
+  group: sync-sheets
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Sync sheets
+        env:
+          CRON_SECRET: ${{ secrets.TRACKRECORD_CRON_SECRET }}
+          CODES: ${{ inputs.codes }}
+        run: |
+          set -euo pipefail
+          if [ -z "${CRON_SECRET:-}" ]; then
+            echo "TRACKRECORD_CRON_SECRET is not set on this repository." >&2
+            exit 1
+          fi
+          URL="https://trackrecord.oxfordhub.app/api/cron/sheets"
+          if [ -n "${CODES:-}" ]; then URL="$URL?codes=$CODES"; fi
+          # 207 = some sheets failed; --fail-with-body only trips on >= 400, so
+          # the JSON check below decides.
+          curl --fail-with-body -sS -X POST --max-time 280 \
+            -H "x-cron-secret: $CRON_SECRET" "$URL" | tee /tmp/out.json
+          echo
+          python3 - <<'PY'
+          import json, sys
+          d = json.load(open("/tmp/out.json"))
+          for r in d.get("report", []):
+              print(f"{r['code']:4} {'ok ' if r['ok'] else 'FAIL'} {r['trades']:5} trades  {r['message']}")
+          if not d.get("ok"):
+              sys.exit("One or more sheets failed to sync — see above.")
+          PY

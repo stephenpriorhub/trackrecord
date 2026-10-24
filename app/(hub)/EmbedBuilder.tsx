@@ -26,7 +26,7 @@ import {
   deleteSavedEmbedAction,
   saveEmbedAction,
   setPortfolioVisibilityAction,
-} from "./actions";
+} from "@/app/(hub)/actions";
 
 type Show = "both" | "open" | "closed";
 type Summary = "benchmark" | "portfolio" | "none";
@@ -348,17 +348,22 @@ export default function EmbedBuilder({
   }
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-6">
+      {savedList.length > 0 && (
+        <SavedList rows={savedList} origin={origin} currentId={current?.id ?? null} />
+      )}
+      <div className="grid gap-6 xl:grid-cols-[420px_minmax(0,1fr)]">
+      <div className="space-y-5">
       <PublishBar
         books={selected}
         allPrivate={!targetPublic}
         onChanged={() => router.refresh()}
       />
 
-      <Panel title="What to embed">
+      <Panel step={1} title="Choose what to show" hint="Pick a publication, then the portfolios to include.">
           <div className="flex flex-wrap items-end gap-4">
             <label className="block">
-              <span className="mb-1.5 block text-xs uppercase tracking-wide text-gray-500">
+              <span className="mb-1.5 block text-xs font-medium text-muted">
                 Publication
               </span>
               <select
@@ -368,7 +373,7 @@ export default function EmbedBuilder({
                   // Portfolio slugs from another publication mean nothing here.
                   setPicked(null);
                 }}
-                className="min-w-56 rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-gray-100"
+                className="min-w-56 rounded-lg border border-line bg-white px-3 py-2 text-sm text-ink"
               >
                 {services.map((sv) => (
                   <option key={sv.slug} value={sv.slug}>
@@ -419,12 +424,12 @@ export default function EmbedBuilder({
 
           <div className="mt-4">
             <div className="mb-1.5 flex items-center gap-3">
-              <span className="text-xs uppercase tracking-wide text-gray-500">Portfolios</span>
+              <span className="text-xs font-medium text-muted">Portfolios</span>
               <button
                 type="button"
                 onClick={() => setPicked(null)}
                 disabled={picked === null}
-                className="text-xs text-blue-400 hover:underline disabled:cursor-default disabled:text-gray-600 disabled:no-underline"
+                className="text-xs text-brand hover:underline disabled:cursor-default disabled:text-faint disabled:no-underline"
               >
                 {picked === null ? "All selected" : "Select all"}
               </button>
@@ -441,28 +446,28 @@ export default function EmbedBuilder({
                     onClick={() => toggleBook(b.slug)}
                     className={`inline-flex items-center gap-2 rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${
                       on
-                        ? "bg-blue-600 text-white"
-                        : "border border-gray-700 bg-gray-800 text-gray-400 hover:text-gray-200"
+                        ? "bg-brand text-white"
+                        : "border border-line bg-white text-muted hover:border-brand hover:text-ink"
                     }`}
                   >
                     <span
                       aria-hidden
                       className={`flex h-3.5 w-3.5 items-center justify-center rounded-sm border text-[10px] leading-none ${
-                        on ? "border-white bg-white text-blue-600" : "border-gray-500"
+                        on ? "border-white bg-white text-brand" : "border-faint"
                       }`}
                     >
                       {on ? "✓" : ""}
                     </span>
                     {b.name}
                     <span className="opacity-60">{b.positions}</span>
-                    {!b.isPublic && <span className="text-yellow-400/80">private</span>}
+                    {!b.isPublic && <span className="text-warn">private</span>}
                   </button>
                 );
               })}
             </div>
           </div>
 
-          <p className="mt-2 text-xs text-gray-600">
+          <p className="mt-2 text-xs text-faint">
             {!whole
               ? "Just this portfolio, with its own return against the S&P 500 since it started."
               : layout === "grouped"
@@ -480,7 +485,7 @@ export default function EmbedBuilder({
         </Panel>
 
       {whole && summary !== "none" && (
-        <Panel title="Publication total">
+        <Panel title="Publication total" hint="The headline figure across the portfolios above.">
           <div className="flex flex-wrap gap-4">
             {layout === "grouped" && (
               <Group label="Total return">
@@ -514,7 +519,7 @@ export default function EmbedBuilder({
               </Group>
             )}
           </div>
-          <p className="mt-2 text-xs text-gray-600">
+          <p className="mt-2 text-xs text-faint">
             {!totalShown
               ? "No publication-wide figure — each portfolio shows its own return vs the S&P 500."
               : selected.every((b) => notInTotal.includes(b.slug))
@@ -526,7 +531,7 @@ export default function EmbedBuilder({
         </Panel>
       )}
 
-      <Panel title="Content">
+      <Panel step={2} title="Choose what readers see" hint="Which positions, figures and columns appear.">
         <div className="flex flex-wrap gap-4">
           <Group label="Show">
             {(["both", "open", "closed"] as Show[]).map((v) => (
@@ -591,7 +596,7 @@ export default function EmbedBuilder({
             ))}
           </Group>
         </div>
-        <p className="mt-2 text-xs text-gray-600">
+        <p className="mt-2 text-xs text-faint">
           Returns are equal-weighted: every position counts as 1. A partly sold
           position is split by size — sell half and each half counts 0.5 — so it
           still counts once in total. The Weight column shows each row&apos;s share,
@@ -601,9 +606,11 @@ export default function EmbedBuilder({
       </Panel>
 
       <Panel
-        title="Look & feel"
+        step={3}
+        title="Style it"
+        hint="Match the page the widget will sit on."
         action={
-          <button type="button" onClick={reset} className="text-xs text-gray-500 hover:text-gray-300">
+          <button type="button" onClick={reset} className="text-xs text-muted hover:text-ink">
             Reset
           </button>
         }
@@ -664,9 +671,7 @@ export default function EmbedBuilder({
         </div>
       </Panel>
 
-      <LivePreview src={previewUrl} />
-
-      <Panel title={current ? `Saved embed: ${current.name}` : "Save this embed"}>
+      <Panel step={4} title={current ? `Save & copy · ${current.name}` : "Save & copy the code"} hint="Save to get a permanent link, then paste the code into your page.">
         <div className="flex flex-wrap items-center gap-2">
           <input
             type="text"
@@ -674,7 +679,7 @@ export default function EmbedBuilder({
             onChange={(e) => setSaveName(e.target.value)}
             placeholder="Name"
             aria-label="Saved embed name"
-            className="min-w-64 flex-1 rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-gray-100"
+            className="min-w-64 flex-1 rounded-lg border border-line bg-white px-3 py-2 text-sm text-ink"
           />
           {current ? (
             <>
@@ -682,7 +687,7 @@ export default function EmbedBuilder({
                 type="button"
                 onClick={() => save(false)}
                 disabled={saving || !dirty || !saveName.trim()}
-                className="rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-500 disabled:opacity-40"
+                className="rounded-lg bg-brand px-3 py-2 text-sm font-medium text-white hover:bg-brand/90 disabled:opacity-40"
               >
                 {saving ? "Saving…" : dirty ? "Save changes" : "Saved"}
               </button>
@@ -690,7 +695,7 @@ export default function EmbedBuilder({
                 type="button"
                 onClick={() => save(true)}
                 disabled={saving || !saveName.trim()}
-                className="rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 text-sm font-medium text-gray-200 hover:bg-gray-700 disabled:opacity-40"
+                className="rounded-lg border border-line bg-white px-3 py-2 text-sm font-medium text-ink hover:border-brand disabled:opacity-40"
               >
                 Save as new
               </button>
@@ -700,14 +705,14 @@ export default function EmbedBuilder({
               type="button"
               onClick={() => save(true)}
               disabled={saving || !saveName.trim()}
-              className="rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-500 disabled:opacity-40"
+              className="rounded-lg bg-brand px-3 py-2 text-sm font-medium text-white hover:bg-brand/90 disabled:opacity-40"
             >
               {saving ? "Saving…" : "Save embed"}
             </button>
           )}
         </div>
-        {saveError && <p className="mt-2 text-xs text-red-400">{saveError}</p>}
-        <p className="mt-2 text-xs text-gray-600">
+        {saveError && <p className="mt-2 text-xs text-loss">{saveError}</p>}
+        <p className="mt-2 text-xs text-faint">
           {current
             ? dirty
               ? "Unsaved changes — pages using this embed still show the last saved version until you save."
@@ -718,11 +723,11 @@ export default function EmbedBuilder({
 
       <div>
         <div className="mb-1 flex items-center justify-between">
-          <span className="text-xs uppercase tracking-wide text-gray-500">
+          <span className="text-xs font-medium text-muted">
             Paste this into the page
           </span>
           <div className="flex items-center gap-3">
-            <label className="flex items-center gap-1.5 text-xs text-gray-400">
+            <label className="flex items-center gap-1.5 text-xs text-muted">
               <input
                 type="checkbox"
                 checked={autoHeight}
@@ -733,34 +738,35 @@ export default function EmbedBuilder({
             <button
               type="button"
               onClick={copy}
-              className="rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-500"
+              className="rounded-lg bg-brand px-3 py-1.5 text-xs font-medium text-white hover:bg-brand/90"
             >
               {copied ? "Copied" : "Copy code"}
             </button>
           </div>
         </div>
-        <pre className="overflow-x-auto rounded-lg border border-gray-800 bg-gray-950 p-3 text-xs leading-relaxed text-gray-300">
+        <pre className="overflow-x-auto rounded-xl border border-line bg-paper p-3 text-xs leading-relaxed text-ink">
           <code>{snippet}</code>
         </pre>
       </div>
 
-      <p className="text-xs text-gray-600">
-        <a href={previewUrl} target="_blank" rel="noreferrer" className="text-blue-400 hover:underline">
+      <p className="text-xs text-faint">
+        <a href={previewUrl} target="_blank" rel="noreferrer" className="text-brand hover:underline">
           Open preview
         </a>{" "}
         — shows unpublished portfolios to you only.{" "}
         {limit === 0 && (
-          <span className="text-yellow-500">
+          <span className="text-warn">
             &quot;All&quot; renders every closed position; a long record makes a very
             large page.{" "}
           </span>
         )}
-        Live URL: <span className="break-all text-gray-500">{url}</span>
+        Live URL: <span className="break-all text-muted">{url}</span>
       </p>
-
-      {savedList.length > 0 && (
-        <SavedList rows={savedList} origin={origin} currentId={current?.id ?? null} />
-      )}
+      </div>
+      <div className="xl:sticky xl:top-6 xl:self-start">
+        <LivePreview src={previewUrl} />
+      </div>
+      </div>
     </div>
   );
 }
@@ -804,7 +810,7 @@ function PublishBar({
   }
 
   return (
-    <div className="rounded-lg border border-yellow-800/50 bg-yellow-900/20 p-3 text-xs text-yellow-200">
+    <div className="rounded-lg border border-warn/30 bg-warn-soft p-4 text-sm text-warn">
       <p className="mb-2">
         {allPrivate
           ? "Nothing selected is published yet, so the live link shows Not Found. The preview below works now."
@@ -818,7 +824,7 @@ function PublishBar({
             type="button"
             disabled={pending}
             onClick={() => publish([b.slug])}
-            className="rounded-full border border-yellow-700/60 bg-yellow-900/40 px-3 py-1 font-medium hover:bg-yellow-800/50 disabled:opacity-50"
+            className="rounded-full border border-warn/40 bg-white px-3 py-1 font-medium hover:bg-warn-soft disabled:opacity-50"
           >
             Publish {b.name}
           </button>
@@ -828,13 +834,13 @@ function PublishBar({
             type="button"
             disabled={pending}
             onClick={() => publish(privateBooks.map((b) => b.slug))}
-            className="rounded-full bg-yellow-600 px-3 py-1 font-semibold text-gray-950 hover:bg-yellow-500 disabled:opacity-50"
+            className="rounded-full bg-warn px-3 py-1 font-semibold text-white hover:bg-warn/90 disabled:opacity-50"
           >
             Publish all {privateBooks.length}
           </button>
         )}
       </div>
-      {error && <p className="mt-2 text-red-300">{error}</p>}
+      {error && <p className="mt-2 text-loss">{error}</p>}
     </div>
   );
 }
@@ -866,12 +872,12 @@ function SavedList({
   }
 
   return (
-    <div className="rounded-xl border border-gray-800 bg-gray-900/40 p-4">
-      <h3 className="mb-3 text-sm font-semibold text-gray-200">Saved embeds</h3>
-      {error && <p className="mb-2 text-xs text-red-400">{error}</p>}
+    <div className="rounded-2xl border border-line bg-card p-5 shadow-sm">
+      <h3 className="mb-3 font-semibold text-ink">Your saved widgets</h3>
+      {error && <p className="mb-2 text-xs text-loss">{error}</p>}
       <div className="overflow-x-auto">
         <table className="w-full text-xs">
-          <thead className="text-left text-gray-500">
+          <thead className="text-left text-muted">
             <tr>
               <th className="p-2">Name</th>
               <th className="p-2">Link</th>
@@ -881,22 +887,22 @@ function SavedList({
           </thead>
           <tbody>
             {rows.map((r) => (
-              <tr key={r.id} className={`border-t border-gray-800 ${r.id === currentId ? "bg-blue-950/30" : ""}`}>
-                <td className="p-2 font-medium text-gray-200">{r.name}</td>
-                <td className="p-2 font-mono text-gray-500">{`${origin}/embed/e/${r.code}`}</td>
-                <td className="p-2 text-gray-500">
+              <tr key={r.id} className={`border-t border-line ${r.id === currentId ? "bg-brand-soft" : ""}`}>
+                <td className="p-2 font-medium text-ink">{r.name}</td>
+                <td className="p-2 font-mono text-muted">{`${origin}/embed/e/${r.code}`}</td>
+                <td className="p-2 text-muted">
                   {new Date(r.updatedAt).toLocaleString("en-US", { timeZone: "America/New_York" })} ET
                   {r.updatedBy ? ` · ${r.updatedBy}` : ""}
                 </td>
                 <td className="whitespace-nowrap p-2 text-right">
-                  <a href={`/embeds?saved=${r.id}`} className="text-blue-400 hover:underline">
+                  <a href={`/embeds?saved=${r.id}`} className="text-brand hover:underline">
                     Edit
                   </a>
                   <button
                     type="button"
                     onClick={() => remove(r)}
                     disabled={pending}
-                    className="ml-3 text-red-400 hover:underline disabled:opacity-40"
+                    className="ml-3 text-loss hover:underline disabled:opacity-40"
                   >
                     Delete
                   </button>
@@ -939,16 +945,16 @@ function LivePreview({ src }: { src: string }) {
   return (
     <div>
       <div className="mb-1.5 flex items-center justify-between">
-        <span className="text-xs uppercase tracking-wide text-gray-500">Live preview</span>
+        <span className="text-xs font-medium text-muted">Live preview</span>
         <div className="flex gap-1.5">
-          <span className="self-center text-xs text-gray-600">Host page</span>
+          <span className="self-center text-xs text-faint">Host page</span>
           <Choice active={host === "light"} onClick={() => setHost("light")}>Light</Choice>
           <Choice active={host === "dark"} onClick={() => setHost("dark")}>Dark</Choice>
         </div>
       </div>
       <div
-        className={`max-h-[760px] overflow-auto rounded-lg border border-gray-800 p-4 ${
-          host === "light" ? "bg-white" : "bg-gray-950"
+        className={`max-h-[760px] overflow-auto rounded-lg border border-line p-4 ${
+          host === "light" ? "bg-white" : "bg-ink"
         }`}
       >
         <iframe
@@ -968,17 +974,31 @@ function LivePreview({ src }: { src: string }) {
 
 function Panel({
   title,
+  step,
+  hint,
   action,
   children,
 }: {
   title: string;
+  step?: number;
+  hint?: string;
   action?: React.ReactNode;
   children: React.ReactNode;
 }) {
   return (
-    <div className="rounded-xl border border-gray-800 bg-gray-900/40 p-4">
-      <div className="mb-3 flex items-center justify-between">
-        <h3 className="text-sm font-semibold text-gray-200">{title}</h3>
+    <div className="rounded-2xl border border-line bg-card p-5 shadow-sm">
+      <div className="mb-4 flex items-start justify-between gap-3">
+        <div className="flex items-start gap-3">
+          {step !== undefined && (
+            <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-brand text-sm font-semibold text-white">
+              {step}
+            </span>
+          )}
+          <div>
+            <h3 className="font-semibold text-ink">{title}</h3>
+            {hint && <p className="mt-0.5 text-xs text-muted">{hint}</p>}
+          </div>
+        </div>
         {action}
       </div>
       {children}
@@ -989,7 +1009,7 @@ function Panel({
 function Group({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div>
-      <div className="mb-1.5 text-xs uppercase tracking-wide text-gray-500">{label}</div>
+      <div className="mb-1.5 text-xs font-medium text-muted">{label}</div>
       <div className="flex flex-wrap items-center gap-1.5">{children}</div>
     </div>
   );
@@ -1005,7 +1025,7 @@ function ColorInput({
   label: string;
 }) {
   return (
-    <span className="inline-flex items-center gap-1.5 rounded-full border border-gray-700 bg-gray-800 py-1 pl-1 pr-2.5">
+    <span className="inline-flex items-center gap-1.5 rounded-full border border-line bg-white py-1 pl-1 pr-2.5">
       <input
         type="color"
         aria-label={label}
@@ -1013,7 +1033,7 @@ function ColorInput({
         onChange={(e) => onChange(e.target.value)}
         className="h-6 w-6 cursor-pointer rounded-full border-0 bg-transparent p-0"
       />
-      <span className="font-mono text-xs text-gray-400">{value}</span>
+      <span className="font-mono text-xs text-muted">{value}</span>
     </span>
   );
 }
@@ -1034,8 +1054,8 @@ function Choice({
       aria-pressed={active}
       className={`rounded-full px-3 py-1.5 text-xs font-medium transition-colors ${
         active
-          ? "bg-blue-600 text-white"
-          : "border border-gray-700 bg-gray-800 text-gray-400 hover:text-gray-200"
+          ? "bg-brand text-white"
+          : "border border-line bg-white text-muted hover:border-brand hover:text-ink"
       }`}
     >
       {children}

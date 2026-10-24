@@ -49,7 +49,7 @@ export default async function HubLayout({ children }: { children: React.ReactNod
           </div>
           <nav className="mt-3 flex flex-wrap gap-4 text-sm">
             {canManage && (
-              <Link href="/" className="text-gray-300 hover:text-white">
+              <Link href="/manage" className="text-gray-300 hover:text-white">
                 Portfolios
               </Link>
             )}
@@ -58,7 +58,7 @@ export default async function HubLayout({ children }: { children: React.ReactNod
                 Embeds
               </Link>
             )}
-            <Link href="/dashboard" className="text-gray-300 hover:text-white">
+            <Link href="/" className="text-gray-300 hover:text-white">
               Track Record
             </Link>
             {isAppLevel(scope) && (

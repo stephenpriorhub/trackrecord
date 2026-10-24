@@ -1,10 +1,11 @@
 import { prisma } from "@/lib/prisma";
 import { getManageContext } from "@/lib/manage-context";
 import { canManageAnything, canManageService, portfolioScopeFilter } from "@/lib/authz";
-import NoManageAccess from "../NoManageAccess";
-import EmbedBuilder, { type EmbedService, type SavedEmbedRow } from "../EmbedBuilder";
+import NoManageAccess from "@/app/(hub)/NoManageAccess";
+import EmbedBuilder, { type EmbedService, type SavedEmbedRow } from "@/app/(hub)/EmbedBuilder";
 
 export const dynamic = "force-dynamic";
+export const metadata = { title: "Widgets · Track Record" };
 
 /**
  * Every embed variation from one place: any publication, whole or one
@@ -88,30 +89,26 @@ export default async function EmbedsPage({
 
   return (
     <div className="space-y-6">
-      <div>
-        <h2 className="text-xl font-semibold">Embeds</h2>
-        <p className="mt-1 max-w-prose text-sm text-gray-500">
-          Build an embed for any publication or portfolio, preview it live, then
-          copy the code into any page.
+      <header>
+        <h1 className="text-2xl font-bold tracking-tight">Widgets</h1>
+        <p className="mt-1 max-w-2xl text-sm text-muted">
+          Build a portfolio widget for any page in four steps. The preview on the right updates as you go, and what you
+          see is exactly what readers get.
         </p>
-      </div>
+      </header>
       {options.length === 0 ? (
-        <p className="rounded-xl border border-gray-800 bg-gray-900 p-5 text-sm text-gray-500">
-          No portfolios to embed yet.
-        </p>
+        <p className="rounded-2xl border border-line bg-card p-5 text-sm text-muted">No portfolios to embed yet.</p>
       ) : (
-        <section className="rounded-xl border border-gray-800 bg-gray-900 p-5">
-          <EmbedBuilder
-            // Remount when switching saved embeds so every control re-seeds.
-            key={editing?.id ?? "new"}
-            origin={origin}
-            editing={editing}
-            savedList={savedList}
-            services={options}
-            initialService={sp.service}
-            initialTarget={sp.portfolio}
-          />
-        </section>
+        <EmbedBuilder
+          // Remount when switching saved embeds so every control re-seeds.
+          key={editing?.id ?? "new"}
+          origin={origin}
+          editing={editing}
+          savedList={savedList}
+          services={options}
+          initialService={sp.service}
+          initialTarget={sp.portfolio}
+        />
       )}
     </div>
   );

@@ -1,0 +1,39 @@
+@import "tailwindcss";
+
+/*
+ * Track Record v2 — light, high-contrast, readable by anyone.
+ *
+ * No `html { visibility: hidden }` here: that hub-nav gate lives only in
+ * globals.css (Portfolio Manager). These pages are guarded server-side, and the
+ * public /t/* pages must render for anonymous readers.
+ */
+@theme {
+  --color-ink: #0f1b2d;
+  --color-muted: #5b6676;
+  --color-faint: #8a94a3;
+  --color-line: #e3e7ed;
+  --color-paper: #f6f8fb;
+  --color-card: #ffffff;
+  --color-brand: #12355b;
+  --color-brand-soft: #e8eef6;
+  --color-gain: #0f8a5f;
+  --color-gain-soft: #e7f6ef;
+  --color-loss: #c2364a;
+  --color-loss-soft: #fbeaec;
+  --color-warn: #a15c07;
+  --color-warn-soft: #fdf3e2;
+}
+
+html {
+  color-scheme: light;
+}
+
+body {
+  background: var(--color-paper);
+  color: var(--color-ink);
+  -webkit-font-smoothing: antialiased;
+}
+
+.num {
+  font-variant-numeric: tabular-nums;
+}

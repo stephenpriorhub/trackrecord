@@ -91,7 +91,7 @@ export default async function PublicationPage({
   return (
     <div className="space-y-10">
       <div>
-        <Link href="/" className="text-xs text-gray-500 hover:text-gray-300">
+        <Link href="/manage" className="text-xs text-gray-500 hover:text-gray-300">
           ← All publications
         </Link>
         <h2 className="mt-2 text-xl font-bold">{service.name}</h2>
