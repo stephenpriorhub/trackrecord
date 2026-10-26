@@ -122,7 +122,7 @@ export function summarise(def: ServiceDef, all: SummaryTrade[], today = todayNY(
     });
   }
   const benchmark = {} as Record<PeriodKey, BenchmarkSummary>;
-  for (const k of ["week", "month", "year", "inception"] as PeriodKey[]) {
+  for (const k of ["week", "lastWeek", "month", "year", "inception"] as PeriodKey[]) {
     const b = periodBounds(k, today);
     benchmark[k] = benchmarkFor(head.filter((t) => inPeriod(t, b)));
   }

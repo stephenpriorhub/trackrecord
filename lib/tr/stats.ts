@@ -7,7 +7,7 @@
  *   - Average return = plain mean of each trade's return.
  *   - Weighted average (War Room) = Σ(return × weight) / Σ(weight).
  *   - Average days held = mean of the hold period.
- *   - "This Week" runs Monday to today, and also takes trades closed after the
+ *   - "This Week" runs Monday to today ("Last Week" the full week before), and also takes trades closed after the
  *     bell on the previous Friday — expirations are stamped Friday evening and
  *     the sheets report them in the following week (DPL's "Note 1").
  *
@@ -27,10 +27,11 @@ export interface StatTrade {
   premiumCapture?: number | null;
 }
 
-export type PeriodKey = "week" | "month" | "year" | "inception";
+export type PeriodKey = "week" | "lastWeek" | "month" | "year" | "inception";
 
 export const PERIOD_LABEL: Record<PeriodKey, string> = {
   week: "This Week",
+  lastWeek: "Last Week",
   month: "Month to Date",
   year: "Year to Date",
   inception: "Since Inception",
@@ -80,6 +81,13 @@ export function periodBounds(key: PeriodKey, today: string = todayNY()): PeriodB
       const monday = addDays(today, -((wd + 6) % 7));
       return { start: monday, end: today, priorFriday: addDays(monday, -3) };
     }
+    case "lastWeek": {
+      // The full Monday-Sunday week before this one, with the same rule for
+      // the Friday after-bell closes that report in the following week.
+      const thisMonday = periodBounds("week", today).start;
+      const monday = addDays(thisMonday, -7);
+      return { start: monday, end: addDays(thisMonday, -1), priorFriday: addDays(monday, -3) };
+    }
     case "month":
       return { start: `${today.slice(0, 7)}-01`, end: today };
     case "year":
@@ -126,7 +134,7 @@ export function computeStats(trades: StatTrade[]): PeriodStats {
 export function statsByPeriod(
   trades: StatTrade[],
   today: string = todayNY(),
-  keys: PeriodKey[] = ["week", "month", "year", "inception"],
+  keys: PeriodKey[] = ["week", "lastWeek", "month", "year", "inception"],
 ): Record<PeriodKey, PeriodStats> {
   const out = {} as Record<PeriodKey, PeriodStats>;
   for (const k of keys) {

@@ -15,7 +15,10 @@ export const dynamic = "force-dynamic";
 export default async function Home() {
   await requireViewer();
   const today = todayNY();
-  const longTerm = SERVICES.filter((s) => s.kind === "INVESTING");
+  // Long-term services read either a sheet (Trend Advisory) or Portfolio
+  // Manager (McCall); only the latter go through the books loader.
+  const longTerm = SERVICES.filter((s) => s.kind === "INVESTING" && !s.sheetId);
+  const sheetLongTerm = SHEET_SERVICES.filter((s) => s.kind === "INVESTING");
 
   const [market, info, byCode, lt] = await Promise.all([
     marketStrip(today),
@@ -26,6 +29,36 @@ export default async function Home() {
   const week = weekAcrossServices(byCode, today);
   const wk = periodBounds("week", today);
   const nameOf = (code: string) => SERVICES.find((s) => s.code === code)?.name ?? code;
+
+  const tradeCard = (def: (typeof SHEET_SERVICES)[number]) => {
+          const trades = byCode.get(def.code) ?? [];
+          const summary = summarise(def, trades, today);
+          const views: CardView[] = [{ key: "all", label: def.byGuru ? "Combined" : "All", stats: summary.headline }];
+          if (def.byGuru) {
+            for (const g of summary.groups.filter((x) => x.kind === "guru")) {
+              views.push({ key: g.key, label: g.label.split(" ")[0], stats: g.stats });
+            }
+          }
+          const excluded = def.subPortfolios.filter((p) => !p.inHeadline);
+          let note: string | undefined;
+          if (excluded.length) {
+            const ex = statsByPeriod(trades.filter((t) => excluded.some((p) => p.key === t.portfolio)), today).inception;
+            note = `${excluded.map((p) => p.label).join(", ")} trades are tracked separately (${int(ex.closed)} trades, ${pct(ex.avgReturn)} avg.).`;
+          }
+          return (
+            <ServiceCard
+              key={def.code}
+              name={def.name}
+              href={`/s/${def.slug}`}
+              logoUrl={info[def.code]?.logoUrl ?? null}
+              gurus={def.gurus}
+              views={views}
+              weighted={!!def.weighted}
+              note={note}
+              wikiUrl={info[def.code]?.wikiUrl}
+            />
+          );
+  };
 
   return (
     <div className="space-y-8">
@@ -86,43 +119,16 @@ export default async function Home() {
       </section>
 
       <div className="space-y-6">
-        {SHEET_SERVICES.map((def) => {
-          const trades = byCode.get(def.code) ?? [];
-          const summary = summarise(def, trades, today);
-          const views: CardView[] = [{ key: "all", label: def.byGuru ? "Combined" : "All", stats: summary.headline }];
-          if (def.byGuru) {
-            for (const g of summary.groups.filter((x) => x.kind === "guru")) {
-              views.push({ key: g.key, label: g.label.split(" ")[0], stats: g.stats });
-            }
-          }
-          const excluded = def.subPortfolios.filter((p) => !p.inHeadline);
-          let note: string | undefined;
-          if (excluded.length) {
-            const ex = statsByPeriod(trades.filter((t) => excluded.some((p) => p.key === t.portfolio)), today).inception;
-            note = `${excluded.map((p) => p.label).join(", ")} trades are tracked separately (${int(ex.closed)} trades, ${pct(ex.avgReturn)} avg.).`;
-          }
-          return (
-            <ServiceCard
-              key={def.code}
-              name={def.name}
-              href={`/s/${def.slug}`}
-              logoUrl={info[def.code]?.logoUrl ?? null}
-              gurus={def.gurus}
-              views={views}
-              weighted={!!def.weighted}
-              note={note}
-              wikiUrl={info[def.code]?.wikiUrl}
-            />
-          );
-        })}
+        {SHEET_SERVICES.filter((d) => d.kind !== "INVESTING").map(tradeCard)}
       </div>
 
       <section>
         <h2 className="mb-1 text-lg font-semibold">Long-term portfolios</h2>
         <p className="mb-4 text-sm text-muted">
-          Matt McCall&apos;s research services hold positions for the long run, so they&apos;re summarised as portfolios
+          Services that hold positions for the long run. Matt McCall&apos;s portfolios are summarised as portfolios
           rather than trades.
         </p>
+        {sheetLongTerm.length > 0 && <div className="mb-4 space-y-6">{sheetLongTerm.map(tradeCard)}</div>}
         <div className="grid gap-4 lg:grid-cols-2">
           {longTerm.map((def, i) => {
             const s = lt[i];

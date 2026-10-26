@@ -1,7 +1,7 @@
 import { days, int, pct, tone } from "@/lib/tr/format";
 import { PERIOD_LABEL, type PeriodKey, type PeriodStats } from "@/lib/tr/stats";
 
-const PERIODS: PeriodKey[] = ["week", "month", "year", "inception"];
+const PERIODS: PeriodKey[] = ["week", "lastWeek", "month", "year", "inception"];
 
 /**
  * The publisher's summary table: periods across, measures down. Matches the
@@ -44,7 +44,7 @@ export function StatsTable({
 
   return (
     <div className="overflow-x-auto">
-      <table className={`num w-full min-w-[520px] ${compact ? "text-[13px]" : "text-sm"}`}>
+      <table className={`num w-full min-w-[620px] ${compact ? "text-[13px]" : "text-sm"}`}>
         <thead>
           <tr className="border-b border-line text-left text-xs text-muted">
             <th className="py-2 pr-3 font-medium" />

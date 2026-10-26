@@ -23,7 +23,7 @@ export interface RecordFlags {
   canEdit?: boolean;
 }
 
-const PERIODS: PeriodKey[] = ["week", "month", "year", "inception"];
+const PERIODS: PeriodKey[] = ["week", "lastWeek", "month", "year", "inception"];
 
 function qs(sp: Record<string, string | undefined>, patch: Record<string, string | undefined>): string {
   const p = new URLSearchParams();

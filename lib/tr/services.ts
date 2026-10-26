@@ -138,7 +138,7 @@ export const SERVICES: ServiceDef[] = [
     code: "TPU",
     slug: "monument-trend-advisory",
     name: "Monument Trend Advisory",
-    kind: "HYBRID",
+    kind: "INVESTING",
     gurus: ["Bryan Bottarelli", "Karim Rahemtulla"],
     sheetId: "1lwSQeaeBIJc57uibDQht-1FvC20XHxX0cXQwQaryK2g",
     // Rebranded from Catalyst Cashouts Live: trades opened from 2026-02-01 on
