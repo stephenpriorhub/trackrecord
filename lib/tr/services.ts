@@ -135,6 +135,23 @@ export const SERVICES: ServiceDef[] = [
     sortOrder: 5,
   },
   {
+    code: "TPU",
+    slug: "monument-trend-advisory",
+    name: "Monument Trend Advisory",
+    kind: "HYBRID",
+    gurus: ["Bryan Bottarelli", "Karim Rahemtulla"],
+    sheetId: "1lwSQeaeBIJc57uibDQht-1FvC20XHxX0cXQwQaryK2g",
+    // Rebranded from Catalyst Cashouts Live: trades opened from 2026-02-01 on
+    // are Trend Advisory. The legacy record is shown, but kept out of the
+    // service's totals.
+    subPortfolios: [
+      { key: "trend-advisory", label: "Monument Trend Advisory", inHeadline: true },
+      { key: "catalyst-cashouts", label: "Catalyst Cashouts Live (before Feb 2026)", inHeadline: false },
+    ],
+    weighted: true,
+    sortOrder: 6,
+  },
+  {
     code: "XAI",
     slug: "mccall-innovation-report",
     name: "The McCall Innovation Report",
@@ -161,7 +178,7 @@ export const SERVICES: ServiceDef[] = [
         pubCodes: ["XM2"],
       },
     ],
-    sortOrder: 6,
+    sortOrder: 7,
   },
   {
     code: "SAT",
@@ -171,7 +188,7 @@ export const SERVICES: ServiceDef[] = [
     gurus: ["Matt McCall"],
     managedPubCode: "SAT",
     subPortfolios: [],
-    sortOrder: 7,
+    sortOrder: 8,
   },
 ];
 

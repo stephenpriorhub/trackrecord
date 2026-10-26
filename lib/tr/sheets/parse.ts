@@ -1,5 +1,6 @@
 import { parseBrokerSheet } from "./parse-broker";
 import { parsePostMarket } from "./parse-pmk";
+import { parseTrendAdvisory } from "./parse-tpu";
 import { parseWarRoom } from "./parse-war";
 import type { ParseResult } from "./types";
 import type { Workbook } from "./workbook";
@@ -16,6 +17,8 @@ export function parseService(code: string, wb: Workbook): ServiceParseResult {
       return parseWarRoom(wb);
     case "PMK":
       return parsePostMarket(wb);
+    case "TPU":
+      return parseTrendAdvisory(wb);
     case "DPL":
     case "PSU":
     case "NBS":

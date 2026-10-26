@@ -282,7 +282,7 @@ function TradeTable({
                         exitPrice: r.exitPrice,
                         returnPct: r.returnPct,
                         credit: r.side === "SHORT",
-                        returnFromSheet: def.code === "PMK",
+                        returnFromSheet: def.code === "PMK" || def.code === "TPU",
                         sheetTab: r.sheetTab,
                         sheetRow: r.sheetRow,
                       }}

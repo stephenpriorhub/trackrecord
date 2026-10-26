@@ -233,6 +233,7 @@ const serialToYmd = (v: unknown) =>
 function cellsFor(code: string, row: unknown[]): CellMap {
   if (code === "WAR") return { open: 8, close: 12, entry: 9, exit: 13, ret: 16, check: 8 };
   if (code === "PMK") return { open: 4, close: 6, entry: 5, exit: 7, ret: null, check: 4 };
+  if (code === "TPU") return { open: 2, close: 4, entry: 3, exit: 5, ret: null, check: 2 };
   // Broker sheets: a closing-fill row has the OCC symbol in column B.
   const isFill = typeof row[1] === "string" && parseSheetOcc(row[1]) !== null;
   return isFill
@@ -259,7 +260,7 @@ export async function editTradeInSheet(opts: {
 
   // Same trade? Open date and published return must both still match.
   const open = serialToYmd(cells[map.check]);
-  const retCell = cells[opts.code === "PMK" ? 8 : (map.ret ?? 10)];
+  const retCell = cells[opts.code === "PMK" ? 8 : opts.code === "TPU" ? 6 : (map.ret ?? 10)];
   const sameReturn =
     opts.expect.returnPct === null ||
     (typeof retCell === "number" && Math.abs(retCell - opts.expect.returnPct) < 1e-4);
