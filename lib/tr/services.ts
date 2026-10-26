@@ -17,6 +17,10 @@ export interface SubPortfolioDef {
   label: string;
   /** Shown on the service page; false = kept out of the service's headline numbers. */
   inHeadline: boolean;
+  /** Its own logo, for a service whose books are separate brands. */
+  logoUrl?: string;
+  /** Span shown beside the label, e.g. "2024–2026". */
+  years?: string;
 }
 
 /**
@@ -54,6 +58,17 @@ export interface ServiceDef {
    * publishes Bryan and Karim separately (Summary Stats tab), never jointly.
    */
   byGuru?: boolean;
+  /**
+   * Each sub-portfolio gets its own full summary table (with its own logo)
+   * instead of one service summary plus a breakdown — for a service whose
+   * books are successive brands (Trend Advisory).
+   */
+  bookTables?: boolean;
+  /**
+   * Closed-trade archives bundled with the app (data/), appended on every
+   * sync: records that no longer live in a maintained sheet.
+   */
+  archives?: { file: string; portfolio: string; label: string }[];
   /** WAR publishes a weighted average; the others a plain average. */
   weighted?: boolean;
   /**
@@ -141,12 +156,35 @@ export const SERVICES: ServiceDef[] = [
     kind: "INVESTING",
     gurus: ["Bryan Bottarelli", "Karim Rahemtulla"],
     sheetId: "1lwSQeaeBIJc57uibDQht-1FvC20XHxX0cXQwQaryK2g",
-    // Rebranded from Catalyst Cashouts Live: trades opened from 2026-02-01 on
-    // are Trend Advisory. The legacy record is shown, but kept out of the
-    // service's totals.
+    // Three successive brands, each tracked separately (Stephen, 2026-10-26):
+    // trades opened from 2026-02-01 on are Trend Advisory; the sheet's
+    // earlier trades are Catalyst Cashouts Live; Trade of the Day Plus is the
+    // original service, bundled as a one-off archive (no sheet to sync). Only
+    // Trend Advisory counts toward the service's own totals.
     subPortfolios: [
-      { key: "trend-advisory", label: "Monument Trend Advisory", inHeadline: true },
-      { key: "catalyst-cashouts", label: "Catalyst Cashouts Live (before Feb 2026)", inHeadline: false },
+      { key: "trend-advisory", label: "Monument Trend Advisory", inHeadline: true, years: "2026–" },
+      {
+        key: "catalyst-cashouts",
+        label: "Catalyst Cashouts Live",
+        inHeadline: false,
+        years: "2024–2026",
+        logoUrl: "/logos/ccl.png",
+      },
+      {
+        key: "totd-plus",
+        label: "Trade of the Day Plus",
+        inHeadline: false,
+        years: "2020–2024",
+        logoUrl: "/logos/totd-plus.jpg",
+      },
+    ],
+    bookTables: true,
+    archives: [
+      {
+        file: "data/tpu-trade-of-the-day-plus-2020-2024.xlsx",
+        portfolio: "totd-plus",
+        label: "Archive: Trade of the Day Plus",
+      },
     ],
     weighted: true,
     sortOrder: 6,

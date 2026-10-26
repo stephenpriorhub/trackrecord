@@ -272,7 +272,7 @@ function TradeTable({
                 )}
                 {flags.canEdit && (
                   <td className="px-2 py-2.5 text-right">
-                    <EditTradeButton
+                    {!r.sheetTab.startsWith("Archive") && <EditTradeButton
                       trade={{
                         id: r.id,
                         name: r.name,
@@ -286,7 +286,7 @@ function TradeTable({
                         sheetTab: r.sheetTab,
                         sheetRow: r.sheetRow,
                       }}
-                    />
+                    />}
                   </td>
                 )}
               </tr>
@@ -315,6 +315,7 @@ export function ServiceRecord({
   flags,
   period,
   updatedAt,
+  mainLogoUrl = null,
 }: {
   def: ServiceDef;
   summary: ServiceSummary;
@@ -325,6 +326,8 @@ export function ServiceRecord({
   flags: RecordFlags;
   period: PeriodKey;
   updatedAt: Date | null;
+  /** The service's own logo, for its first book when books have their own. */
+  mainLogoUrl?: string | null;
 }) {
   const filtering = Object.entries(filters).some(([k, v]) => v && !["page", "sort", "dir"].includes(k));
   const ret = def.weighted ? list.filtered.weightedAvgReturn : list.filtered.avgReturn;
@@ -335,25 +338,65 @@ export function ServiceRecord({
 
   return (
     <div className="space-y-6">
+      {def.bookTables ? (
+        def.subPortfolios.map((p, i) => {
+          const g = summary.groups.find((x) => x.kind === "portfolio" && x.key === p.key);
+          if (!g) return null;
+          const logo = p.logoUrl ?? (i === 0 ? mainLogoUrl : null);
+          return (
+            <section key={p.key} className="rounded-2xl border border-line bg-card p-5 shadow-sm">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="flex flex-wrap items-center gap-4">
+                  {logo ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={logo} alt={p.label} className="h-10 w-auto max-w-[220px] object-contain" />
+                  ) : null}
+                  <h2 className="text-lg font-semibold">
+                    {p.label}
+                    {p.years && <span className="ml-2 font-normal text-muted">({p.years})</span>}
+                  </h2>
+                </div>
+                <Link
+                  href={`${basePath}${qs({}, { portfolio: p.key })}#trades`}
+                  className="text-sm font-medium text-brand hover:underline"
+                >
+                  See these trades →
+                </Link>
+              </div>
+              <div className="mt-3">
+                <StatsTable stats={g.stats} weighted={!!def.weighted} />
+              </div>
+              {i === 0 && updatedAt && (
+                <p className="mt-2 text-xs text-faint">
+                  Updated from the spreadsheet {updatedAt.toLocaleString("en-US", { timeZone: "America/New_York", dateStyle: "medium", timeStyle: "short" })} ET
+                </p>
+              )}
+            </section>
+          );
+        })
+      ) : (
+        <>
       <section className="rounded-2xl border border-line bg-card p-5 shadow-sm">
-        <div className="flex flex-wrap items-baseline justify-between gap-2">
-          <h2 className="text-lg font-semibold">Performance summary</h2>
-          <p className="text-xs text-muted">
-            {summary.firstTrade && <>Since {fmtDate(summary.firstTrade)} · </>}
-            {updatedAt && <>Updated from the spreadsheet {updatedAt.toLocaleString("en-US", { timeZone: "America/New_York", dateStyle: "medium", timeStyle: "short" })} ET</>}
-          </p>
-        </div>
-        <div className="mt-3">
-          <StatsTable stats={summary.headline} weighted={!!def.weighted} />
-        </div>
-        {def.subPortfolios.some((p) => !p.inHeadline) && (
-          <p className="mt-2 text-xs text-faint">
-            Totals exclude {def.subPortfolios.filter((p) => !p.inHeadline).map((p) => p.label).join(", ")}, which is tracked separately below.
-          </p>
-        )}
-      </section>
-
-      <Breakdown def={def} summary={summary} period={period} basePath={basePath} params={params} />
+          <div className="flex flex-wrap items-baseline justify-between gap-2">
+            <h2 className="text-lg font-semibold">Performance summary</h2>
+            <p className="text-xs text-muted">
+              {summary.firstTrade && <>Since {fmtDate(summary.firstTrade)} · </>}
+              {updatedAt && <>Updated from the spreadsheet {updatedAt.toLocaleString("en-US", { timeZone: "America/New_York", dateStyle: "medium", timeStyle: "short" })} ET</>}
+            </p>
+          </div>
+          <div className="mt-3">
+            <StatsTable stats={summary.headline} weighted={!!def.weighted} />
+          </div>
+          {def.subPortfolios.some((p) => !p.inHeadline) && (
+            <p className="mt-2 text-xs text-faint">
+              Totals exclude {def.subPortfolios.filter((p) => !p.inHeadline).map((p) => p.label).join(", ")}, which is tracked separately below.
+            </p>
+          )}
+        </section>
+  
+        <Breakdown def={def} summary={summary} period={period} basePath={basePath} params={params} />
+        </>
+      )}
 
       {flags.showBenchmark && <BenchmarkPanel summary={summary} />}
 

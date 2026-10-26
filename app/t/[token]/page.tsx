@@ -54,6 +54,7 @@ export default async function PublicServicePage({
           basePath={`/t/${token}`}
           flags={{ internal: false, showBenchmark: row.publicShowBenchmark }}
           period={breakdownPeriod(sp)}
+          mainLogoUrl={data.info.logoUrl}
           updatedAt={row.lastSyncedAt}
         />
       )}

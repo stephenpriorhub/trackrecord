@@ -55,6 +55,7 @@ export default async function ServicePage({
           basePath={`/s/${def.slug}`}
           flags={{ internal: true, showBenchmark: true, canEdit: viewer.canLog }}
           period={breakdownPeriod(sp)}
+          mainLogoUrl={data.info.logoUrl}
           updatedAt={data.settings?.lastSyncedAt ?? null}
         />
       )}

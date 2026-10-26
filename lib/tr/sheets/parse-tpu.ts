@@ -53,6 +53,21 @@ function parseContract(text: string) {
 }
 
 export function parseTrendAdvisory(wb: Workbook): ParseResult {
+  return parseTpuLayout(wb, TAB, (open) => (open >= TREND_ADVISORY_START ? "trend-advisory" : "catalyst-cashouts"));
+}
+
+/**
+ * The original Trade of the Day Plus record (2020-2024), same layout. Bundled
+ * with the app; `label` becomes the trade's tab so it can't be edited as if it
+ * were a live sheet row.
+ */
+export function parseTpuArchive(wb: Workbook, portfolio: string, label: string): ParseResult {
+  const res = parseTpuLayout(wb, TAB, () => portfolio);
+  for (const t of res.trades) t.tab = label;
+  return res;
+}
+
+function parseTpuLayout(wb: Workbook, TAB: string, bookFor: (open: string) => string): ParseResult {
   const out: ParseResult = { trades: [], skipped: [] };
   const rows = wb.rows(TAB);
   if (!rows) throw new Error(`Trend Advisory sheet has no "${TAB}" tab`);
@@ -113,7 +128,7 @@ export function parseTrendAdvisory(wb: Workbook): ParseResult {
       serviceCode: "TPU",
       tab: TAB,
       row: n,
-      portfolio: open >= TREND_ADVISORY_START ? "trend-advisory" : "catalyst-cashouts",
+      portfolio: bookFor(open),
       guru: EDITORS[txt(r[C.editor]).toUpperCase()] ?? null,
       name,
       symbol: raw,

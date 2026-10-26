@@ -34,12 +34,20 @@ export default async function Home() {
           const trades = byCode.get(def.code) ?? [];
           const summary = summarise(def, trades, today);
           const views: CardView[] = [{ key: "all", label: def.byGuru ? "Combined" : "All", stats: summary.headline }];
+          if (def.bookTables) {
+            // One view per brand, each with its own figures (Trend Advisory first).
+            views.splice(0, 1);
+            for (const sp of def.subPortfolios) {
+              const g = summary.groups.find((x) => x.kind === "portfolio" && x.key === sp.key);
+              if (g) views.push({ key: sp.key, label: sp.years ? `${sp.label.replace(/^Monument /, "")} (${sp.years})` : sp.label, stats: g.stats });
+            }
+          }
           if (def.byGuru) {
             for (const g of summary.groups.filter((x) => x.kind === "guru")) {
               views.push({ key: g.key, label: g.label.split(" ")[0], stats: g.stats });
             }
           }
-          const excluded = def.subPortfolios.filter((p) => !p.inHeadline);
+          const excluded = def.bookTables ? [] : def.subPortfolios.filter((p) => !p.inHeadline);
           let note: string | undefined;
           if (excluded.length) {
             const ex = statsByPeriod(trades.filter((t) => excluded.some((p) => p.key === t.portfolio)), today).inception;

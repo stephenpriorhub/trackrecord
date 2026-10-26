@@ -9,10 +9,13 @@
  * One run at a time per process; a second request while one is running gets
  * the running one's promise.
  */
+import fs from "node:fs";
+import path from "node:path";
 import { prisma } from "../prisma";
 import { loadBenchmarkSeries, type BenchmarkSeries } from "../managed/benchmark";
 import { SHEET_SERVICES, serviceByCode } from "./services";
 import { parseService } from "./sheets/parse";
+import { parseTpuArchive } from "./sheets/parse-tpu";
 import type { ParsedTrade } from "./sheets/types";
 import { parseSheetOcc } from "./sheets/types";
 import { fetchSheetXlsx, readWorkbook } from "./sheets/workbook";
@@ -184,6 +187,12 @@ async function syncOne(code: string, spy: BenchmarkSeries | null, dividends: Div
   try {
     const wb = await readWorkbook(await fetchSheetXlsx(def.sheetId));
     const res = parseService(code, wb);
+    // Bundled archives (records with no live sheet) ride along every sync.
+    for (const a of def.archives ?? []) {
+      const ar = parseTpuArchive(await readWorkbook(fs.readFileSync(path.join(process.cwd(), a.file))), a.portfolio, a.label);
+      res.trades.push(...ar.trades);
+      res.skipped.push(...ar.skipped);
+    }
     if (res.trades.length === 0) {
       // An empty parse of a sheet that has history is a broken read (a tab
       // renamed, the sheet blanked), never "this service has no trades".
