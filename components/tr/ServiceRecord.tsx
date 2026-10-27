@@ -8,6 +8,7 @@ import {
   SORTS,
   TYPE_FILTERS,
   airtableUrl,
+  defaultDir,
   type ServiceSummary,
   type TradeFilters as Filters,
   type TradeRow,
@@ -184,14 +185,44 @@ function tradeKind(r: TradeRow): string {
   }
 }
 
+interface SortState {
+  key: string;
+  dir: "asc" | "desc";
+  href: (key: string, dir: "asc" | "desc") => string;
+}
+
+/** A column header that sorts the table; a second click reverses it. */
+function SortTh({ label, k, sort, right }: { label: React.ReactNode; k: string; sort?: SortState; right?: boolean }) {
+  const cls = `px-3 py-2.5 font-medium ${right ? "text-right" : ""}`;
+  if (!sort) return <th className={cls}>{label}</th>;
+  const active = sort.key === k;
+  const next = active ? (sort.dir === "asc" ? "desc" : "asc") : defaultDir(k);
+  return (
+    <th className={cls} aria-sort={active ? (sort.dir === "asc" ? "ascending" : "descending") : "none"}>
+      <Link
+        href={sort.href(k, next)}
+        scroll={false}
+        className={`inline-flex items-center gap-1 hover:text-brand ${active ? "text-ink" : ""}`}
+      >
+        {label}
+        <span className={active ? "text-brand" : "text-faint"} aria-hidden>
+          {active ? (sort.dir === "asc" ? "▲" : "▼") : "↕"}
+        </span>
+      </Link>
+    </th>
+  );
+}
+
 function TradeTable({
   def,
   rows,
   flags,
+  sort,
 }: {
   def: ServiceDef;
   rows: TradeRow[];
   flags: RecordFlags;
+  sort?: SortState;
 }) {
   const book = (k: string) => def.subPortfolios.find((p) => p.key === k)?.label;
   return (
@@ -199,13 +230,17 @@ function TradeTable({
       <table className="num w-full min-w-[860px] text-sm">
         <thead className="bg-paper">
           <tr className="text-left text-xs text-muted">
-            <th className="px-3 py-2.5 font-medium">Trade</th>
-            <th className="px-3 py-2.5 font-medium">Opened</th>
-            <th className="px-3 py-2.5 font-medium">Closed</th>
-            <th className="px-3 py-2.5 text-right font-medium">Days</th>
+            <SortTh label="Trade" k="symbol" sort={sort} />
+            <SortTh label="Opened" k="opened" sort={sort} />
+            {rows.some((r) => r.status === "CLOSED") || !sort ? (
+              <SortTh label="Closed" k="closed" sort={sort} />
+            ) : (
+              <th className="px-3 py-2.5 font-medium">Closed</th>
+            )}
+            <SortTh label="Days" k="days" sort={sort} right />
             <th className="px-3 py-2.5 text-right font-medium">Entry → Exit</th>
-            <th className="px-3 py-2.5 text-right font-medium">Return</th>
-            {flags.showBenchmark && <th className="px-3 py-2.5 text-right font-medium">S&amp;P same days</th>}
+            <SortTh label="Return" k="return" sort={sort} right />
+            {flags.showBenchmark && <SortTh label={<>S&amp;P same days</>} k="spx" sort={sort} right />}
             {flags.internal && <th className="px-3 py-2.5 text-right font-medium">Airtable</th>}
             {flags.canEdit && <th className="px-3 py-2.5" />}
           </tr>
@@ -411,7 +446,16 @@ export function ServiceRecord({
             <p className="text-sm text-muted">{int(open.length)} open in Airtable</p>
           </div>
           {open.length > 0 ? (
-            <TradeTable def={def} rows={open} flags={{ ...flags, showBenchmark: flags.showBenchmark }} />
+            <TradeTable
+              def={def}
+              rows={open}
+              flags={flags}
+              sort={{
+                key: params.osort && params.osort !== "closed" ? params.osort : "opened",
+                dir: params.odir === "asc" ? "asc" : params.odir === "desc" ? "desc" : defaultDir(params.osort ?? "opened"),
+                href: (k, d) => `${basePath}${qs(params, { osort: k, odir: d })}#open`,
+              }}
+            />
           ) : (
             <p className="rounded-xl border border-line bg-card px-4 py-6 text-center text-sm text-muted">No open positions.</p>
           )}
@@ -443,7 +487,16 @@ export function ServiceRecord({
           sorts={SORTS}
           showAirtable={flags.internal}
         />
-        <TradeTable def={def} rows={list.rows} flags={flags} />
+        <TradeTable
+          def={def}
+          rows={list.rows}
+          flags={flags}
+          sort={{
+            key: filters.sort ?? "closed",
+            dir: filters.dir ?? defaultDir(filters.sort ?? "closed"),
+            href: (k, d) => `${basePath}${qs(params, { sort: k, dir: d, page: undefined })}#trades`,
+          }}
+        />
         {list.pages > 1 && (
           <nav className="flex items-center justify-between text-sm">
             <span className="text-muted">

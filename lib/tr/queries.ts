@@ -192,7 +192,11 @@ export const SORTS: { value: string; label: string }[] = [
   { value: "return", label: "Return" },
   { value: "days", label: "Days held" },
   { value: "symbol", label: "Ticker" },
+  { value: "spx", label: "S&P same days" },
 ];
+
+/** Direction a column sorts in when first clicked. */
+export const defaultDir = (sort: string) => (sort === "symbol" ? "asc" : "desc");
 
 const isYmd = (s?: string) => !!s && /^\d{4}-\d{2}-\d{2}$/.test(s);
 const day = (s: string) => new Date(`${s}T00:00:00Z`);
@@ -262,6 +266,7 @@ function orderBy(f: TradeFilters): Prisma.TrTradeOrderByWithRelationInput[] {
     case "opened": return [{ openDate: dir }, { id: "asc" }];
     case "return": return [{ returnPct: nulls }, { id: "asc" }];
     case "days": return [{ holdDays: nulls }, { id: "asc" }];
+    case "spx": return [{ spxReturnPct: nulls }, { id: "asc" }];
     case "symbol": return [{ underlying: dir }, { closeDate: "desc" }, { id: "asc" }];
     default: return [{ closeDate: nulls }, { openDate: dir }, { id: "asc" }];
   }
@@ -277,11 +282,12 @@ const ROW_SELECT = {
   sheetTab: true, sheetRow: true, currentPrice: true,
 } as const;
 
-/** Open positions (from Airtable), newest first. */
-export function listOpen(code: string) {
+/** Open positions (from Airtable), newest first unless a column is chosen. */
+export function listOpen(code: string, sort?: string, dir?: "asc" | "desc") {
+  const f: TradeFilters = { sort: sort && SORTS.some((s) => s.value === sort) && sort !== "closed" ? sort : "opened", dir };
   return prisma.trTrade.findMany({
     where: { serviceCode: code, status: "OPEN" },
-    orderBy: [{ openDate: "desc" }, { id: "asc" }],
+    orderBy: orderBy(f),
     select: ROW_SELECT,
   });
 }

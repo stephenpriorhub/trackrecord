@@ -36,7 +36,9 @@ export async function loadServicePage(def: ServiceDef, sp: SearchParams, publicO
   const [byCode, list, open] = await Promise.all([
     loadSummaryTrades([def.code]),
     listTrades(def.code, filters),
-    publicOnly ? Promise.resolve([]) : listOpen(def.code),
+    publicOnly
+      ? Promise.resolve([])
+      : listOpen(def.code, flatParams(sp).osort, flatParams(sp).odir === "asc" ? "asc" : flatParams(sp).odir === "desc" ? "desc" : undefined),
   ]);
   return {
     kind: "trading" as const,
