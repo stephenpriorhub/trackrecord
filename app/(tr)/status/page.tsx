@@ -13,7 +13,17 @@ interface Issues {
   skipped?: { tab: string; row: number; symbol: string; reason: string }[];
   crossLabelled?: { row: number; symbol: string; label: string }[];
   pending?: { row: number; tab: string; symbol: string }[];
+  airtable?: {
+    live: boolean;
+    error: string | null;
+    open: number;
+    closes: { positionId: string; positionName: string; symbol: string; closeDate: string; exitPrice: number; weight: number; action: string; sheet: string; tradeId?: string }[];
+    unsent: number;
+    manual: { positionId: string; positionName: string; sheet: string; reason: string }[];
+  };
 }
+
+const posUrl = (id: string) => `https://airtable.com/appnWWpR52p6T38EU/tbldV1JfYJoqZIoMk/${id}`;
 
 export default async function StatusPage() {
   const viewer = await requireViewer();
@@ -77,6 +87,39 @@ export default async function StatusPage() {
                   {int(missing[def.code] ?? 0)} trades with no matching Airtable position
                 </Link>
               </li>
+              {issues.airtable?.error && (
+                <li className="text-loss">Airtable: {issues.airtable.error}</li>
+              )}
+              {issues.airtable && issues.airtable.closes.length > 0 && (
+                <li>
+                  <p className="font-medium">
+                    {issues.airtable.live
+                      ? "Closed in Airtable on the last sync, from the sheet:"
+                      : "Closed in the sheet, still open in Airtable (closing trades ready; sending is off):"}
+                  </p>
+                  <ul className="mt-1 space-y-0.5 text-muted">
+                    {issues.airtable.closes.map((c, i) => (
+                      <li key={i}>
+                        <a href={posUrl(c.positionId)} target="_blank" rel="noreferrer" className="text-brand hover:underline">{c.positionName}</a>
+                        {" "}— {c.action.toLowerCase()} {c.weight} at ${c.exitPrice} on {c.closeDate} ({c.sheet})
+                      </li>
+                    ))}
+                  </ul>
+                </li>
+              )}
+              {issues.airtable && issues.airtable.manual.length > 0 && (
+                <li>
+                  <p className="font-medium">Closed in the sheet but needs closing by hand in Airtable:</p>
+                  <ul className="mt-1 space-y-0.5 text-muted">
+                    {issues.airtable.manual.map((m, i) => (
+                      <li key={i}>
+                        <a href={posUrl(m.positionId)} target="_blank" rel="noreferrer" className="text-brand hover:underline">{m.positionName}</a>
+                        {" "}— {m.reason} ({m.sheet})
+                      </li>
+                    ))}
+                  </ul>
+                </li>
+              )}
               {issues.pending && issues.pending.length > 0 && (
                 <li>
                   <p className="font-medium">Not yet copied into “Since Inception” (counted from their period tab):</p>

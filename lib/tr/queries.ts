@@ -37,6 +37,7 @@ const SUMMARY_SELECT = {
   guru: true,
   spxReturnPct: true,
   serviceCode: true,
+  airtableId: true,
 } as const;
 
 const ymd = (d: Date | null) => (d ? d.toISOString().slice(0, 10) : null);
@@ -229,7 +230,9 @@ function where(code: string, f: TradeFilters): Prisma.TrTradeWhereInput {
     const q = f.q.toUpperCase();
     and.push({ OR: [{ underlying: { startsWith: q } }, { symbol: { contains: q } }, { name: { contains: f.q, mode: "insensitive" } }] });
   }
-  if (f.status) and.push({ status: f.status });
+  // The trade list is the sheet's closed trades unless open ones are asked for;
+  // open positions have their own table.
+  and.push({ status: f.status ?? "CLOSED" });
   if (f.portfolio) and.push({ portfolio: f.portfolio });
   if (f.guru) and.push({ guru: f.guru });
   switch (f.type) {
@@ -266,6 +269,23 @@ function orderBy(f: TradeFilters): Prisma.TrTradeOrderByWithRelationInput[] {
 
 export const PAGE_SIZE = 50;
 
+const ROW_SELECT = {
+  id: true, name: true, symbol: true, underlying: true, portfolio: true, guru: true,
+  assetType: true, structure: true, optionType: true, side: true, status: true,
+  openDate: true, closeDate: true, entryPrice: true, exitPrice: true, returnPct: true,
+  premiumCapture: true, holdDays: true, airtableId: true, spxReturnPct: true, notes: true,
+  sheetTab: true, sheetRow: true, currentPrice: true,
+} as const;
+
+/** Open positions (from Airtable), newest first. */
+export function listOpen(code: string) {
+  return prisma.trTrade.findMany({
+    where: { serviceCode: code, status: "OPEN" },
+    orderBy: [{ openDate: "desc" }, { id: "asc" }],
+    select: ROW_SELECT,
+  });
+}
+
 export type TradeRow = Awaited<ReturnType<typeof listTrades>>["rows"][number];
 
 export async function listTrades(code: string, f: TradeFilters) {
@@ -277,13 +297,7 @@ export async function listTrades(code: string, f: TradeFilters) {
       orderBy: orderBy(f),
       skip: (page - 1) * PAGE_SIZE,
       take: PAGE_SIZE,
-      select: {
-        id: true, name: true, symbol: true, underlying: true, portfolio: true, guru: true,
-        assetType: true, structure: true, optionType: true, side: true, status: true,
-        openDate: true, closeDate: true, entryPrice: true, exitPrice: true, returnPct: true,
-        premiumCapture: true, holdDays: true, airtableId: true, spxReturnPct: true, notes: true,
-        sheetTab: true, sheetRow: true,
-      },
+      select: ROW_SELECT,
     }),
     prisma.trTrade.count({ where: w }),
     prisma.trTrade.findMany({

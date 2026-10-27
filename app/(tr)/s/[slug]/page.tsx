@@ -50,6 +50,7 @@ export default async function ServicePage({
           def={def}
           summary={data.summary}
           list={data.list}
+          open={data.open}
           filters={data.filters}
           params={flatParams(sp)}
           basePath={`/s/${def.slug}`}

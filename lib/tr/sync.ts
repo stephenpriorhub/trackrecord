@@ -19,6 +19,7 @@ import { parseTpuArchive } from "./sheets/parse-tpu";
 import type { ParsedTrade } from "./sheets/types";
 import { parseSheetOcc } from "./sheets/types";
 import { fetchSheetXlsx, readWorkbook } from "./sheets/workbook";
+import { autoCloseLive, loadOpenPositions, openRow, planCloses, sendCloses, type AtOpenPosition } from "./airtable-open";
 
 export const BENCHMARK = "SPY";
 
@@ -200,7 +201,32 @@ async function syncOne(code: string, spy: BenchmarkSeries | null, dividends: Div
       throw new Error("The sheet parsed to zero trades; keeping the previous copy.");
     }
 
+    // Open positions live from Airtable. A failure here never blocks the
+    // sheet's trades; the open list just keeps nothing until the next run.
+    let openPositions: AtOpenPosition[] = [];
+    let airtableError: string | null = null;
+    try {
+      openPositions = await loadOpenPositions(code);
+    } catch (e) {
+      airtableError = e instanceof Error ? e.message : String(e);
+    }
+
     const mirror = await loadMirror(code);
+    // A position opened since the mirror's last refresh still has to match.
+    const known = new Set(mirror.map((m) => m.airtableId));
+    for (const p of openPositions) {
+      if (known.has(p.id)) continue;
+      const contracts = new Set<string>();
+      const underlyings = new Set<string>();
+      for (const s of p.symbols) {
+        const k = contractKey(s);
+        if (k) {
+          contracts.add(k);
+          underlyings.add(k.split("|")[0]);
+        } else underlyings.add(s);
+      }
+      mirror.push({ airtableId: p.id, contracts, underlyings, open: Date.parse(`${p.openDate}T00:00:00Z`), close: null });
+    }
     const byUnderlying = new Map<string, MirrorPos[]>();
     for (const p of mirror) for (const u of p.underlyings) {
       if (!byUnderlying.has(u)) byUnderlying.set(u, []);
@@ -208,10 +234,36 @@ async function syncOne(code: string, spy: BenchmarkSeries | null, dividends: Div
     }
 
     const keys = sourceKeys(res.trades);
-    let matched = 0;
-    const data = res.trades.map((t, i) => {
-      const airtableId = matchAirtable(t, byUnderlying);
-      if (airtableId) matched++;
+    const matches = res.trades.map((t) => matchAirtable(t, byUnderlying));
+    const matched = matches.filter(Boolean).length;
+
+    // Sheet closes Airtable doesn't have yet -> closing trades in Airtable.
+    const plan = planCloses(code, openPositions, res.trades.map((trade, i) => ({ trade, airtableId: matches[i] })));
+    const live = autoCloseLive();
+    let sent: Awaited<ReturnType<typeof sendCloses>> = { sent: [], error: null };
+    if (live && plan.closes.length) {
+      sent = await sendCloses(plan.closes);
+      if (sent.sent.length) {
+        await prisma.trAirtableClose.createMany({
+          data: sent.sent.map((c) => ({
+            serviceCode: code,
+            positionId: c.positionId,
+            positionName: c.positionName,
+            tradeId: c.tradeId,
+            symbol: c.symbol,
+            closeDate: new Date(`${c.closeDate}T00:00:00Z`),
+            exitPrice: c.exitPrice,
+            weight: c.weight,
+            sheetRef: c.sheet,
+          })),
+        });
+      }
+    }
+    const closedNow = new Set(sent.sent.map((c) => c.positionId));
+    const stillOpen = openPositions.filter((p) => !plan.closing.has(p.id) || (live && !closedNow.has(p.id)));
+
+    const sheetRows = res.trades.map((t, i) => {
+      const airtableId = matches[i];
       return {
         serviceCode: code,
         sourceKey: keys[i],
@@ -241,16 +293,63 @@ async function syncOne(code: string, spy: BenchmarkSeries | null, dividends: Div
         notes: t.notes,
         airtableId,
         spxReturnPct: spy ? spxReturn(spy, dividends, t.openDate, t.closeDate) : null,
+        currentPrice: null as number | null,
       };
     });
+    const openRows = stillOpen.map((p) => {
+      const t = openRow(code, p);
+      return {
+        serviceCode: code,
+        sourceKey: `${code}|Airtable|${p.id}`,
+        sheetTab: t.tab,
+        sheetRow: t.row,
+        portfolio: t.portfolio,
+        guru: t.guru,
+        name: t.name,
+        symbol: t.symbol,
+        underlying: t.underlying,
+        assetType: t.assetType,
+        structure: t.structure,
+        optionType: t.optionType,
+        strike: t.strike,
+        expiry: t.expiry ? new Date(`${t.expiry}T00:00:00Z`) : null,
+        side: t.side,
+        status: t.status,
+        openDate: new Date(`${t.openDate}T00:00:00Z`),
+        closeDate: null,
+        closeAfterBell: false,
+        entryPrice: t.entryPrice,
+        exitPrice: null,
+        returnPct: t.returnPct,
+        weight: t.weight,
+        premiumCapture: null,
+        holdDays: t.holdDays,
+        notes: null,
+        airtableId: p.id,
+        spxReturnPct: spy ? spxReturn(spy, dividends, t.openDate, null) : null,
+        currentPrice: t.currentPrice,
+      };
+    });
+    const data = [...sheetRows, ...openRows];
 
     const issues = {
       skipped: res.skipped,
       crossLabelled: res.crossLabelled ?? [],
       pending: res.pending ?? [],
+      airtable: {
+        live,
+        error: airtableError ?? sent.error,
+        open: openRows.length,
+        // Dry run: what would be sent. Live: what was.
+        closes: (live ? sent.sent : plan.closes).map(({ fields: _f, ...c }) => c),
+        unsent: live ? plan.closes.length - sent.sent.length : 0,
+        manual: plan.manual,
+      },
     };
     const message =
-      `${data.length} trades` +
+      `${sheetRows.length} trades, ${openRows.length} open in Airtable` +
+      (plan.closes.length ? `; ${live ? `${sent.sent.length} closed in Airtable` : `${plan.closes.length} Airtable closes waiting`}` : "") +
+      (plan.manual.length ? `; ${plan.manual.length} to close by hand in Airtable` : "") +
       (issues.pending.length ? `; ${issues.pending.length} not yet in Since Inception` : "") +
       (issues.skipped.length ? `; ${issues.skipped.length} rows skipped` : "") +
       (issues.crossLabelled.length ? `; ${issues.crossLabelled.length} labelled as another service` : "");
@@ -267,7 +366,7 @@ async function syncOne(code: string, spy: BenchmarkSeries | null, dividends: Div
       },
       { timeout: 120_000, maxWait: 30_000 },
     );
-    return { code, ok: true, trades: data.length, airtableMatched: matched, message, ms: Date.now() - started };
+    return { code, ok: true, trades: sheetRows.length, airtableMatched: matched, message, ms: Date.now() - started };
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);
     // Record the failure but leave the stored trades alone.

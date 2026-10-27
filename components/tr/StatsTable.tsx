@@ -17,6 +17,11 @@ export function StatsTable({
   compact?: boolean;
 }) {
   const rows: { label: string; hint?: string; cell: (s: PeriodStats) => React.ReactNode }[] = [
+    {
+      label: "Trades opened",
+      hint: "Positions opened in the period, whether still open or since closed",
+      cell: (s) => (s.opened === undefined ? "—" : int(s.opened)),
+    },
     { label: "Closed trades", cell: (s) => int(s.closed) },
     { label: "Winners", cell: (s) => int(s.winners) },
     { label: "Win rate", cell: (s) => pct(s.winRate, 1) },

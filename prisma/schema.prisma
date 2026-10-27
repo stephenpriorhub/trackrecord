@@ -735,9 +735,30 @@ model TrTrade {
   airtableId     String?
   /// S&P 500 (SPY) close-to-close over the same open->close window.
   spxReturnPct   Float?
+  /// Open rows only (sheetTab "Airtable"): Airtable's latest price.
+  currentPrice   Float?
   createdAt      DateTime  @default(now())
 
   @@index([serviceCode, closeDate])
   @@index([serviceCode, openDate])
   @@index([underlying])
+}
+
+/// A closing trade this app added to Airtable because the sheet recorded the
+/// close first (lib/tr/airtable-open.ts). An audit log; never read back as data.
+model TrAirtableClose {
+  id           String   @id @default(cuid())
+  serviceCode  String
+  positionId   String
+  positionName String
+  /// The Airtable trade record created.
+  tradeId      String   @unique
+  symbol       String
+  closeDate    DateTime @db.Date
+  exitPrice    Float
+  weight       Float
+  sheetRef     String
+  createdAt    DateTime @default(now())
+
+  @@index([serviceCode, createdAt])
 }

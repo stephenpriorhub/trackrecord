@@ -63,7 +63,6 @@ export default async function Home() {
               views={views}
               weighted={!!def.weighted}
               note={note}
-              wikiUrl={info[def.code]?.wikiUrl}
             />
           );
   };

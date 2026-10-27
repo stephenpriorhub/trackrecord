@@ -7,6 +7,8 @@
  *   - Average return = plain mean of each trade's return.
  *   - Weighted average (War Room) = Σ(return × weight) / Σ(weight).
  *   - Average days held = mean of the hold period.
+ *   - Trades opened = positions OPENED in the period, still open or not. A
+ *     position the sheet closes in parts (several rows) counts once.
  *   - "This Week" runs Monday to today ("Last Week" the full week before), and also takes trades closed after the
  *     bell on the previous Friday — expirations are stamped Friday evening and
  *     the sheets report them in the following week (DPL's "Note 1").
@@ -25,6 +27,7 @@ export interface StatTrade {
   name: string;
   symbol: string;
   premiumCapture?: number | null;
+  airtableId?: string | null;
 }
 
 export type PeriodKey = "week" | "lastWeek" | "month" | "year" | "inception";
@@ -38,6 +41,8 @@ export const PERIOD_LABEL: Record<PeriodKey, string> = {
 };
 
 export interface PeriodStats {
+  /** Positions opened in the period, open or since closed (statsByPeriod only). */
+  opened?: number;
   closed: number;
   winners: number;
   winRate: number | null;
@@ -140,6 +145,11 @@ export function statsByPeriod(
   for (const k of keys) {
     const b = periodBounds(k, today);
     out[k] = computeStats(trades.filter((t) => inPeriod(t, b)));
+    const opened = new Set<string>();
+    for (const t of trades) {
+      if (t.openDate >= b.start && t.openDate <= b.end) opened.add(t.airtableId ?? `${t.symbol}|${t.openDate}`);
+    }
+    out[k].opened = opened.size;
   }
   return out;
 }

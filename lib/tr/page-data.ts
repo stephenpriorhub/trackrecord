@@ -5,7 +5,7 @@
 import { prisma } from "../prisma";
 import { longTermBooks } from "./longterm";
 import { publicationInfo } from "./publications";
-import { listTrades, loadSummaryTrades, parseFilters, summarise } from "./queries";
+import { listOpen, listTrades, loadSummaryTrades, parseFilters, summarise } from "./queries";
 import type { ServiceDef } from "./services";
 import type { PeriodKey } from "./stats";
 
@@ -31,13 +31,20 @@ export async function loadServicePage(def: ServiceDef, sp: SearchParams, publicO
   }
 
   const filters = parseFilters(sp);
-  const [byCode, list] = await Promise.all([loadSummaryTrades([def.code]), listTrades(def.code, filters)]);
+  // Open positions are internal: they're live recommendations, so the
+  // public page never carries them.
+  const [byCode, list, open] = await Promise.all([
+    loadSummaryTrades([def.code]),
+    listTrades(def.code, filters),
+    publicOnly ? Promise.resolve([]) : listOpen(def.code),
+  ]);
   return {
     kind: "trading" as const,
     info,
     settings,
     summary: summarise(def, byCode.get(def.code) ?? []),
     list,
+    open,
     filters,
   };
 }

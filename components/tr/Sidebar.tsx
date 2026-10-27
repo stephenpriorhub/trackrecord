@@ -65,6 +65,14 @@ export function Sidebar({ groups, footer }: { groups: NavGroup[]; footer?: NavIt
           </div>
         </div>
       )}
+      <a
+        href="https://mta-wiki.oxfordhub.app/publications"
+        target="_blank"
+        rel="noreferrer"
+        className="block rounded-lg border border-line px-3 py-2 text-center text-sm font-medium text-brand hover:border-brand hover:bg-brand-soft"
+      >
+        MTA Wiki ↗
+      </a>
     </nav>
   );
 

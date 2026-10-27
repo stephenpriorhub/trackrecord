@@ -30,7 +30,7 @@ const C = {
 
 const OWNERS: Record<string, string> = { B: "Bryan Bottarelli", K: "Karim Rahemtulla" };
 
-function strategy(group: string, ptype: string, isOption: boolean): string {
+export function strategy(group: string, ptype: string, isOption: boolean): string {
   const g = `${group} ${ptype}`.toLowerCase();
   if (g.includes("strangle")) return "strangles";
   if (g.includes("put sell")) return "put-sells";
