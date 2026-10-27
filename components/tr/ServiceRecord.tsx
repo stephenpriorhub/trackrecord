@@ -174,6 +174,15 @@ function BenchmarkPanel({ summary }: { summary: ServiceSummary }) {
   );
 }
 
+/** "Massive 2026-10-27T15:02Z" -> "Massive · Oct 27, 11:02 AM". */
+function priceSource(notes: string | null): string {
+  if (!notes?.startsWith("Massive")) return "Airtable price";
+  const at = notes.slice(8);
+  if (!at) return "Massive";
+  const d = new Date(at);
+  return `Massive · ${d.toLocaleString("en-US", { timeZone: "America/New_York", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}`;
+}
+
 function tradeKind(r: TradeRow): string {
   if (r.assetType === "STOCK") return r.side === "SHORT" ? "Stock (short)" : "Stock";
   switch (r.structure) {
@@ -267,7 +276,9 @@ function TradeTable({
                 <td className="px-3 py-2.5 text-right">{r.holdDays ?? "—"}</td>
                 <td className="whitespace-nowrap px-3 py-2.5 text-right text-muted">
                   {price(r.entryPrice)} → {price(r.status === "OPEN" ? r.currentPrice : r.exitPrice)}
-                  {r.status === "OPEN" && <span className="block text-[11px] text-faint">latest</span>}
+                  {r.status === "OPEN" && (
+                    <span className="block text-[11px] text-faint">{priceSource(r.notes)}</span>
+                  )}
                 </td>
                 <td className="px-3 py-2.5 text-right">
                   <span className={`inline-block rounded-md px-2 py-0.5 font-semibold ${chipTone(r.returnPct)}`}>{signedPct(r.returnPct)}</span>
@@ -468,7 +479,7 @@ export function ServiceRecord({
 
       <section id="trades" className="scroll-mt-20 space-y-4">
         <div className="flex flex-wrap items-baseline justify-between gap-2">
-          <h2 className="text-lg font-semibold">Closed trades</h2>
+          <h2 className="text-lg font-semibold">{filters.q && !filters.status ? "All trades" : "Closed trades"}</h2>
           <p className="text-sm text-muted">
             {int(list.total)} {filtering ? "matching" : ""} trades
             {list.filtered.closed > 0 && (

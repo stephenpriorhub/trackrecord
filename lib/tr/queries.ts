@@ -234,9 +234,11 @@ function where(code: string, f: TradeFilters): Prisma.TrTradeWhereInput {
     const q = f.q.toUpperCase();
     and.push({ OR: [{ underlying: { startsWith: q } }, { symbol: { contains: q } }, { name: { contains: f.q, mode: "insensitive" } }] });
   }
-  // The trade list is the sheet's closed trades unless open ones are asked for;
-  // open positions have their own table.
-  and.push({ status: f.status ?? "CLOSED" });
+  // The trade list is the sheet's closed trades unless open ones are asked
+  // for; open positions have their own table.
+  // A search looks through everything, open positions included.
+  if (f.status) and.push({ status: f.status });
+  else if (!f.q) and.push({ status: "CLOSED" });
   if (f.portfolio) and.push({ portfolio: f.portfolio });
   if (f.guru) and.push({ guru: f.guru });
   switch (f.type) {

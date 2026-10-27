@@ -19,7 +19,16 @@ import { parseTpuArchive } from "./sheets/parse-tpu";
 import type { ParsedTrade } from "./sheets/types";
 import { parseSheetOcc } from "./sheets/types";
 import { fetchSheetXlsx, readWorkbook } from "./sheets/workbook";
-import { autoCloseLive, loadOpenPositions, openRow, planCloses, sendCloses, type AtOpenPosition } from "./airtable-open";
+import {
+  autoCloseLive,
+  loadOpenPositions,
+  openRow,
+  planCloses,
+  priceOpenPositions,
+  sendCloses,
+  type AtOpenPosition,
+  type LivePrice,
+} from "./airtable-open";
 
 export const BENCHMARK = "SPY";
 
@@ -296,8 +305,10 @@ async function syncOne(code: string, spy: BenchmarkSeries | null, dividends: Div
         currentPrice: null as number | null,
       };
     });
+    // Our own prices for what's open; Airtable's where Massive has none.
+    const prices = await priceOpenPositions(stillOpen).catch(() => new Map<string, LivePrice>());
     const openRows = stillOpen.map((p) => {
-      const t = openRow(code, p);
+      const t = openRow(code, p, prices.get(p.id));
       return {
         serviceCode: code,
         sourceKey: `${code}|Airtable|${p.id}`,
@@ -324,7 +335,7 @@ async function syncOne(code: string, spy: BenchmarkSeries | null, dividends: Div
         weight: t.weight,
         premiumCapture: null,
         holdDays: t.holdDays,
-        notes: null,
+        notes: t.notes,
         airtableId: p.id,
         spxReturnPct: spy ? spxReturn(spy, dividends, t.openDate, null) : null,
         currentPrice: t.currentPrice,

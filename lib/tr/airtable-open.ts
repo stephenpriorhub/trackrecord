@@ -26,6 +26,7 @@
  *     row, so nothing is ever closed twice.
  */
 import { AIRTABLE_TO_PUB_CODE } from "../publications";
+import { fetchSnapshots, isMassiveConfigured } from "../massive";
 import { fetchTradeGroupNames } from "../managed/import";
 import { serviceByCode } from "./services";
 import { strategy } from "./sheets/parse-war";
@@ -386,6 +387,67 @@ export async function sendCloses(closes: PlannedClose[]): Promise<{ sent: (Plann
   return { sent, error: null };
 }
 
+// ---- pricing --------------------------------------------------------------------------
+
+export interface LivePrice {
+  price: number;
+  asOf: Date | null;
+}
+
+/**
+ * Prices open positions from Massive, leg by leg: a spread's price is the net
+ * of its legs (bought legs add, sold legs subtract), each leg counted by its
+ * share of the position. A position with any leg Massive can't price keeps
+ * Airtable's price rather than a partial one.
+ */
+export async function priceOpenPositions(positions: AtOpenPosition[]): Promise<Map<string, LivePrice>> {
+  const out = new Map<string, LivePrice>();
+  if (!isMassiveConfigured() || !positions.length) return out;
+  const ticker = (sym: string) => (parseSheetOcc(sym) ? `O:${sym}` : sym);
+  const today = new Date().toLocaleDateString("en-CA", { timeZone: "America/New_York" });
+  // Legs we can net with confidence, or none (-> Airtable's price): all
+  // options on one underlying, none expired, in small whole-number ratios.
+  // Anything else — stock mixed with options after an assignment, a leg that
+  // expired years ago, odd weights — produced nonsense nets (a $921 spread).
+  const legsOf = (p: AtOpenPosition) => {
+    const opens = p.trades.filter((t) => t.intent === "OPEN" && t.netOpen > 1e-9 && t.symbol);
+    if (!opens.length) return [];
+    if (opens.length > 1) {
+      const occs = opens.map((t) => parseSheetOcc(t.symbol));
+      if (occs.some((o) => !o || o.expiry < today)) return [];
+      if (new Set(occs.map((o) => o!.underlying)).size > 1) return [];
+    }
+    const unit = Math.min(...opens.map((t) => t.netOpen));
+    const legs = opens.map((t) => ({ ticker: ticker(t.symbol), sign: t.action.toLowerCase() === "sell" ? -1 : 1, ratio: t.netOpen / unit }));
+    return legs.every((l) => l.ratio <= 4 && Math.abs(l.ratio - Math.round(l.ratio)) < 0.01) ? legs : [];
+  };
+  const all = positions.flatMap(legsOf).map((l) => l.ticker);
+  const snap = await fetchSnapshots(all);
+  for (const p of positions) {
+    const legs = legsOf(p);
+    if (!legs.length) continue;
+    let net = 0;
+    let asOf: Date | null = null;
+    let ok = true;
+    for (const l of legs) {
+      const row = snap.rows.get(l.ticker.toUpperCase());
+      if (!row?.last) {
+        ok = false;
+        break;
+      }
+      net += l.sign * l.ratio * row.last.toNumber();
+      if (row.providerAsOf && (!asOf || row.providerAsOf < asOf)) asOf = row.providerAsOf;
+    }
+    if (!ok) continue;
+    // A net wildly off Airtable's own mark means the legs didn't net the way
+    // we assumed; keep Airtable's.
+    const at = p.currentPrice !== null ? Math.abs(p.currentPrice) : null;
+    if (legs.length > 1 && at && (Math.abs(net) > at * 3 + 0.5 || Math.abs(net) < at / 3 - 0.5)) continue;
+    out.set(p.id, { price: Math.abs(net), asOf });
+  }
+  return out;
+}
+
 // ---- open rows ----------------------------------------------------------------------
 
 /** Which of the service's books an open Airtable position belongs in. */
@@ -405,7 +467,11 @@ function bookFor(code: string, p: AtOpenPosition, option: boolean, underlying: s
 }
 
 /** An open Airtable position as a trade row (status OPEN). */
-export function openRow(code: string, p: AtOpenPosition): ParsedTrade & { currentPrice: number | null; airtableId: string } {
+export function openRow(
+  code: string,
+  p: AtOpenPosition,
+  live?: LivePrice,
+): ParsedTrade & { currentPrice: number | null; airtableId: string } {
   const occs = p.symbols.map(parseSheetOcc).filter((o): o is NonNullable<typeof o> => !!o);
   const option = occs.length > 0;
   const underlying = occs[0]?.underlying ?? (p.symbols[0] ?? p.name.split(/\s+/)[0] ?? "").toUpperCase();
@@ -422,9 +488,11 @@ export function openRow(code: string, p: AtOpenPosition): ParsedTrade & { curren
   // Return worked out here, the way the sheets do it: on the debit paid, or
   // on the credit received for a sold position. Airtable's own figure
   // measures sold positions against margin, which reads near zero.
-  const entry = p.netOpenPrice !== null ? Math.abs(p.netOpenPrice) : null;
-  const cur = p.currentPrice !== null ? Math.abs(p.currentPrice) : null;
-  const returnPct = entry && cur !== null ? (p.side === "SHORT" ? (entry - cur) / entry : cur / entry - 1) : p.returnPct;
+  // No opening price in Airtable (DPL/PSU record none) = no return, not 0%.
+  const entry = p.netOpenPrice ? Math.abs(p.netOpenPrice) : null;
+  const curRaw = live ? live.price : p.currentPrice;
+  const cur = curRaw !== null ? Math.abs(curRaw) : null;
+  const returnPct = entry && cur !== null ? (p.side === "SHORT" ? (entry - cur) / entry : cur / entry - 1) : null;
   let portfolio = bookFor(code, p, option, underlying);
   if (code === "WAR" && base.structure === "PUT_SELL") portfolio = "put-sells";
   if (code === "WAR" && base.structure === "STRANGLE") portfolio = "strangles";
@@ -442,14 +510,15 @@ export function openRow(code: string, p: AtOpenPosition): ParsedTrade & { curren
     openDate: p.openDate,
     closeDate: null,
     closeAfterBell: false,
-    entryPrice: p.netOpenPrice,
+    entryPrice: entry === null ? null : p.side === "SHORT" ? -entry : entry,
     exitPrice: null,
     returnPct,
     weight: p.netOpenWeight || 1,
     premiumCapture: null,
     holdDays: Math.max(0, Math.round((Date.now() - Date.parse(`${p.openDate}T00:00:00Z`)) / DAY)),
-    notes: null,
-    currentPrice: p.currentPrice,
+    // Where the current price came from, shown under it.
+    notes: live ? `Massive${live.asOf ? ` ${live.asOf.toISOString()}` : ""}` : "Airtable",
+    currentPrice: cur,
     airtableId: p.id,
   };
 }
