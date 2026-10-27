@@ -137,7 +137,7 @@ export default async function Home() {
           rather than trades.
         </p>
         {sheetLongTerm.length > 0 && <div className="mb-4 space-y-6">{sheetLongTerm.map(tradeCard)}</div>}
-        <div className="grid gap-4 lg:grid-cols-2">
+        <div className="space-y-6">
           {longTerm.map((def, i) => {
             const s = lt[i];
             const logo = info[def.code]?.logoUrl;
