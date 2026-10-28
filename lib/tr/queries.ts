@@ -166,6 +166,10 @@ export interface TradeFilters {
   guru?: string;
   type?: string;
   result?: "win" | "loss";
+  /** Returns above this, in percent as typed (50 = returns over 50%). */
+  minReturn?: number;
+  /** Only returns of 100% or more. */
+  big?: boolean;
   openedFrom?: string;
   openedTo?: string;
   closedFrom?: string;
@@ -210,6 +214,7 @@ export function parseFilters(sp: Record<string, string | string[] | undefined>):
   const result = one("result");
   const dir = one("dir");
   const airtable = one("airtable");
+  const minReturn = Number(one("minReturn")?.replace(/[%,\s]/g, ""));
   return {
     q: one("q")?.slice(0, 40),
     status: status === "OPEN" || status === "CLOSED" ? status : undefined,
@@ -217,6 +222,8 @@ export function parseFilters(sp: Record<string, string | string[] | undefined>):
     guru: one("guru"),
     type: TYPE_FILTERS.some((t) => t.value === one("type")) ? one("type") : undefined,
     result: result === "win" || result === "loss" ? result : undefined,
+    minReturn: one("minReturn") && Number.isFinite(minReturn) ? minReturn : undefined,
+    big: one("big") === "1" || undefined,
     openedFrom: isYmd(one("openedFrom")) ? one("openedFrom") : undefined,
     openedTo: isYmd(one("openedTo")) ? one("openedTo") : undefined,
     closedFrom: isYmd(one("closedFrom")) ? one("closedFrom") : undefined,
@@ -252,6 +259,8 @@ function where(code: string, f: TradeFilters): Prisma.TrTradeWhereInput {
   }
   if (f.result === "win") and.push({ returnPct: { gt: 0 } });
   if (f.result === "loss") and.push({ returnPct: { lte: 0 } });
+  if (f.minReturn !== undefined) and.push({ returnPct: { gt: f.minReturn / 100 } });
+  if (f.big) and.push({ returnPct: { gte: 1 } });
   if (f.openedFrom) and.push({ openDate: { gte: day(f.openedFrom) } });
   if (f.openedTo) and.push({ openDate: { lte: day(f.openedTo) } });
   if (f.closedFrom) and.push({ closeDate: { gte: day(f.closedFrom) } });

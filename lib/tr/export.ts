@@ -132,6 +132,8 @@ export function describeFilters(def: ServiceDef, f: TradeFilters): string {
   if (f.guru) parts.push(f.guru);
   if (f.type) parts.push(TYPE_FILTERS.find((t) => t.value === f.type)?.label ?? f.type);
   if (f.result) parts.push(f.result === "win" ? "winners" : "non-winners");
+  if (f.minReturn !== undefined) parts.push(`return above ${f.minReturn}%`);
+  if (f.big) parts.push("100%+ returns");
   if (f.openedFrom || f.openedTo) parts.push(`opened ${f.openedFrom ?? "…"} to ${f.openedTo ?? "…"}`);
   if (f.closedFrom || f.closedTo) parts.push(`closed ${f.closedFrom ?? "…"} to ${f.closedTo ?? "…"}`);
   if (f.airtable) parts.push(f.airtable === "missing" ? "no Airtable match" : "matched in Airtable");

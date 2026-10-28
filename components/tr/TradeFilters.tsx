@@ -103,6 +103,14 @@ export function TradeFilters({
           </select>
         </div>
         <div>
+          <label className={label} htmlFor="f-mr">Return above (%)</label>
+          <input id="f-mr" type="number" step="any" inputMode="decimal" name="minReturn" defaultValue={v("minReturn")} className={field} />
+          <label className="mt-1.5 flex items-center gap-1.5 text-xs text-ink">
+            <input type="checkbox" name="big" value="1" defaultChecked={v("big") === "1"} className="accent-brand" />
+            100%+ only
+          </label>
+        </div>
+        <div>
           <label className={label} htmlFor="f-s">Sort by</label>
           <select id="f-s" name="sort" defaultValue={v("sort")} className={field}>
             {sorts.map((s) => (
