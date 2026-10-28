@@ -296,6 +296,16 @@ export function listOpen(code: string, sort?: string, dir?: "asc" | "desc") {
 
 export type TradeRow = Awaited<ReturnType<typeof listTrades>>["rows"][number];
 
+/** Every trade the filters match, in the list's order — for downloads. */
+export function exportTrades(code: string, f: TradeFilters) {
+  return prisma.trTrade.findMany({
+    where: where(code, f),
+    orderBy: orderBy(f),
+    take: 20000,
+    select: { ...ROW_SELECT, weight: true, closeAfterBell: true },
+  });
+}
+
 export async function listTrades(code: string, f: TradeFilters) {
   const w = where(code, f);
   const page = f.page ?? 1;

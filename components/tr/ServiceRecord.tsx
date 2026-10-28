@@ -2,7 +2,7 @@ import Link from "next/link";
 import { StatsTable } from "./StatsTable";
 import { TradeFilters } from "./TradeFilters";
 import { EditTradeButton } from "./EditTradeButton";
-import { chipTone, days, fmtDate, int, pct, price, signedPct, tone } from "@/lib/tr/format";
+import { chipTone, days, fmtDate, int, pct, price, signedPct, tone, tradeKind } from "@/lib/tr/format";
 import {
   PAGE_SIZE,
   SORTS,
@@ -181,17 +181,6 @@ function priceSource(notes: string | null): string {
   if (!at) return "Massive";
   const d = new Date(at);
   return `Massive · ${d.toLocaleString("en-US", { timeZone: "America/New_York", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}`;
-}
-
-function tradeKind(r: TradeRow): string {
-  if (r.assetType === "STOCK") return r.side === "SHORT" ? "Stock (short)" : "Stock";
-  switch (r.structure) {
-    case "PUT_SELL": return "Sold put";
-    case "STRANGLE": return "Strangle";
-    case "SPREAD": return `${r.optionType === "PUT" ? "Put" : r.optionType === "CALL" ? "Call" : "Option"} spread`;
-    case "BUTTERFLY": return "Butterfly";
-    default: return r.optionType === "CALL" ? "Bought call" : r.optionType === "PUT" ? "Bought put" : "Option";
-  }
 }
 
 interface SortState {
@@ -479,7 +468,23 @@ export function ServiceRecord({
 
       <section id="trades" className="scroll-mt-20 space-y-4">
         <div className="flex flex-wrap items-baseline justify-between gap-2">
-          <h2 className="text-lg font-semibold">{filters.q && !filters.status ? "All trades" : "Closed trades"}</h2>
+          <div className="flex flex-wrap items-center gap-3">
+            <h2 className="text-lg font-semibold">{filters.q && !filters.status ? "All trades" : "Closed trades"}</h2>
+            {flags.internal && list.total > 0 && (
+              <span className="flex gap-1.5 text-xs">
+                {(["xlsx", "csv"] as const).map((f) => (
+                  <a
+                    key={f}
+                    href={`${basePath}/export${qs(params, { format: f, page: undefined })}`}
+                    download
+                    className="rounded-md border border-line bg-card px-2.5 py-1 font-medium text-brand hover:border-brand hover:bg-brand-soft"
+                  >
+                    {f === "xlsx" ? "Download Excel" : "CSV"}
+                  </a>
+                ))}
+              </span>
+            )}
+          </div>
           <p className="text-sm text-muted">
             {int(list.total)} {filtering ? "matching" : ""} trades
             {list.filtered.closed > 0 && (

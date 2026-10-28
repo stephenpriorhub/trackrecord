@@ -44,3 +44,20 @@ export function price(x: number | null | undefined): string {
 export function int(n: number | null | undefined): string {
   return n === null || n === undefined ? "—" : n.toLocaleString("en-US");
 }
+
+/** "Bought call", "Sold put", "Stock (short)"… — how a trade is described. */
+export function tradeKind(r: {
+  assetType: string;
+  structure: string;
+  optionType: string | null;
+  side: string;
+}): string {
+  if (r.assetType === "STOCK") return r.side === "SHORT" ? "Stock (short)" : "Stock";
+  switch (r.structure) {
+    case "PUT_SELL": return "Sold put";
+    case "STRANGLE": return "Strangle";
+    case "SPREAD": return `${r.optionType === "PUT" ? "Put" : r.optionType === "CALL" ? "Call" : "Option"} spread`;
+    case "BUTTERFLY": return "Butterfly";
+    default: return r.optionType === "CALL" ? "Bought call" : r.optionType === "PUT" ? "Bought put" : "Option";
+  }
+}
