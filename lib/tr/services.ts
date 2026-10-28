@@ -65,6 +65,11 @@ export interface ServiceDef {
    */
   bookTables?: boolean;
   /**
+   * The home card gets a switch between All and each sub-portfolio, like the
+   * War Room's Combined / Bryan / Karim (PMK's Dark Ticker / Stock Flips).
+   */
+  bookToggle?: boolean;
+  /**
    * Closed-trade archives bundled with the app (data/), appended on every
    * sync: records that no longer live in a maintained sheet.
    */
@@ -147,6 +152,7 @@ export const SERVICES: ServiceDef[] = [
       { key: "dark-ticker", label: "Dark Ticker", inHeadline: true },
       { key: "stock-flips", label: "Stock Flips", inHeadline: true },
     ],
+    bookToggle: true,
     sortOrder: 5,
   },
   {

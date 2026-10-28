@@ -42,6 +42,12 @@ export default async function Home() {
               if (g) views.push({ key: sp.key, label: sp.years ? `${sp.label.replace(/^Monument /, "")} (${sp.years})` : sp.label, stats: g.stats });
             }
           }
+          if (def.bookToggle) {
+            for (const sp of def.subPortfolios) {
+              const g = summary.groups.find((x) => x.kind === "portfolio" && x.key === sp.key);
+              if (g) views.push({ key: sp.key, label: sp.label, stats: g.stats });
+            }
+          }
           if (def.byGuru) {
             for (const g of summary.groups.filter((x) => x.kind === "guru")) {
               views.push({ key: g.key, label: g.label.split(" ")[0], stats: g.stats });
