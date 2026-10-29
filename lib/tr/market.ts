@@ -13,7 +13,7 @@ import { periodBounds, todayNY } from "./stats";
 
 export const MARKETS = [
   { ticker: "I:SPX", label: "S&P 500" },
-  { ticker: "I:NDX", label: "Nasdaq 100" },
+  { ticker: "I:COMP", label: "Nasdaq" },
   { ticker: "I:DJI", label: "Dow 30" },
 ] as const;
 
