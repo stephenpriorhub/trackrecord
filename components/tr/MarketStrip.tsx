@@ -9,7 +9,7 @@ export function MarketStrip({ rows, asOf }: { rows: MarketRow[]; asOf: Date | nu
           <div key={m.ticker} className="px-5 py-4">
             <div className="flex items-baseline justify-between gap-2">
               <p className="font-semibold text-ink">{m.label}</p>
-              <p className="num text-sm text-muted">{m.last !== null ? `$${m.last.toFixed(2)}` : "—"}</p>
+              <p className="num text-sm text-muted">{m.last !== null ? m.last.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : "—"}</p>
             </div>
             <dl className="num mt-2 grid grid-cols-4 gap-2 text-sm">
               {(
@@ -30,8 +30,8 @@ export function MarketStrip({ rows, asOf }: { rows: MarketRow[]; asOf: Date | nu
         ))}
       </div>
       <p className="border-t border-line px-5 py-2 text-[11px] text-faint">
-        Measured on SPY, QQQ and DIA, the ETFs that track each index.
-        {asOf && ` Prices as of ${asOf.toLocaleString("en-US", { timeZone: "America/New_York", dateStyle: "medium", timeStyle: "short" })} ET.`}
+        Index levels, delayed 15 minutes.
+        {asOf && ` As of ${asOf.toLocaleString("en-US", { timeZone: "America/New_York", dateStyle: "medium", timeStyle: "short" })} ET.`}
       </p>
     </section>
   );

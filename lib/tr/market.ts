@@ -2,8 +2,8 @@
  * The market strip at the top of the home page: S&P 500, Nasdaq and Dow —
  * today, week-to-date, month-to-date and year-to-date.
  *
- * Measured on the index ETFs (SPY, QQQ, DIA): the Massive plan carries no
- * index feeds. Latest price from a Massive snapshot; the reference closes
+ * Measured on the indices themselves (Massive Indices Starter, 15-minute
+ * delayed). Latest level from a Massive snapshot; the reference closes
  * (last close before this week / before this month) from the permanent daily
  * close cache.
  */
@@ -12,9 +12,9 @@ import { benchmarkCloseOn, loadBenchmarkSeries } from "../managed/benchmark";
 import { periodBounds, todayNY } from "./stats";
 
 export const MARKETS = [
-  { ticker: "SPY", label: "S&P 500" },
-  { ticker: "QQQ", label: "Nasdaq 100" },
-  { ticker: "DIA", label: "Dow 30" },
+  { ticker: "I:SPX", label: "S&P 500" },
+  { ticker: "I:NDX", label: "Nasdaq 100" },
+  { ticker: "I:DJI", label: "Dow 30" },
 ] as const;
 
 export interface MarketRow {

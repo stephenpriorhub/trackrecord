@@ -118,8 +118,12 @@ export function normalizeRow(raw: Raw): SnapshotRow | null {
   const underlying = obj(raw.underlying_asset);
 
   // The quirk this whole file exists to encapsulate.
+  // Indices (I:SPX…) carry no trades: the level is `value`.
+  const isIndex = type === "indices";
   const last =
-    kind === "OPTION"
+    isIndex
+      ? positive(num(raw.value)) ?? positive(num(session.close))
+      : kind === "OPTION"
       ? positive(num(session.close)) ?? positive(num(lastTrade.price))
       : positive(num(session.price)) ??
         positive(num(lastTrade.price)) ??
@@ -156,6 +160,7 @@ export function normalizeRow(raw: Raw): SnapshotRow | null {
     // "prices as of" on the public site claim the data was current when it is 15
     // minutes old. Verified against the live API, not assumed.
     providerAsOf:
+      (isIndex ? nsToDate(raw.last_updated) : null) ??
       nsToDate(lastTrade.last_updated) ??
       nsToDate(underlying.last_updated) ??
       nsToDate(session.last_updated),
@@ -163,6 +168,8 @@ export function normalizeRow(raw: Raw): SnapshotRow | null {
     delayed:
       typeof lastTrade.timeframe === "string"
         ? lastTrade.timeframe.toUpperCase() === "DELAYED"
+        : typeof raw.timeframe === "string"
+        ? raw.timeframe.toUpperCase() === "DELAYED"
         : null,
     marketStatus: typeof raw.market_status === "string" ? raw.market_status : null,
   };

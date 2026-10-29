@@ -14,6 +14,7 @@
  */
 import { prisma } from "../prisma";
 import { dec, type D } from "../money";
+import { fetchOne } from "../massive";
 
 const BASE = () =>
   (process.env.MASSIVE_BASE ?? "https://api.massive.com").replace(/\/+$/, "");
@@ -279,8 +280,28 @@ export async function loadBenchmarkSeries(
   };
 }
 
+/**
+ * The index each benchmark ETF tracks. A comparison is measured on the index
+ * itself whenever the index history reaches back to its start date — the
+ * Massive Indices Starter plan begins Feb 14, 2023 — and on the ETF before that.
+ */
+const INDEX_FOR: Record<string, string> = { SPY: "I:SPX", QQQ: "I:NDX", DIA: "I:DJI", IWM: "I:RUT" };
+
+const liveIndex = new Map<string, { at: number; value: D | null }>();
+
+/** An index's current (15-minute delayed) level, held for a minute. */
+async function indexLevel(index: string): Promise<D | null> {
+  const hit = liveIndex.get(index);
+  if (hit && Date.now() - hit.at < 60_000) return hit.value;
+  const value = await fetchOne(index).then((r) => r?.last ?? null).catch(() => null);
+  liveIndex.set(index, { at: Date.now(), value });
+  return value ?? (await latestClose(index));
+}
+
 export interface BenchmarkComparison {
   ticker: string;
+  /** What the return was actually measured on: the index (I:SPX) or the ETF. */
+  measuredOn: string;
   /** Fractional return over the same window as the portfolio. */
   return: D | null;
   from: Date | null;
@@ -300,12 +321,29 @@ export async function benchmarkSince(
 ): Promise<BenchmarkComparison> {
   const empty: BenchmarkComparison = {
     ticker,
+    measuredOn: ticker,
     return: null,
     from: since,
     startClose: null,
     currentPrice: null,
   };
   if (!since) return empty;
+
+  const index = INDEX_FOR[ticker];
+  if (index) {
+    const start = await benchmarkCloseOn(index, since);
+    const current = start && !start.isZero() ? await indexLevel(index) : null;
+    if (start && current) {
+      return {
+        ticker,
+        measuredOn: index,
+        return: current.minus(start).div(start),
+        from: since,
+        startClose: start,
+        currentPrice: current,
+      };
+    }
+  }
 
   // Prefer the live price the snapshot job maintains. Fall back to the latest
   // daily close, so a benchmark that was only just chosen shows a comparison
@@ -325,6 +363,7 @@ export async function benchmarkSince(
 
   return {
     ticker,
+    measuredOn: ticker,
     return: current.minus(start).div(start),
     from: since,
     startClose: start,
