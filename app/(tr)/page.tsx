@@ -185,7 +185,9 @@ export default async function Home() {
                 ) : (
                   <p className="mt-4 text-sm text-muted">No positions published yet.</p>
                 )}
-                <span className="mt-4 text-sm font-medium text-brand group-hover:underline">View portfolio →</span>
+                <span className="mt-4 self-end rounded-lg bg-brand px-4 py-2 text-sm font-medium text-white group-hover:bg-brand/90">
+                  View full portfolio →
+                </span>
               </Link>
             );
           })}
