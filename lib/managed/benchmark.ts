@@ -69,11 +69,15 @@ export async function benchmarkCloseOn(
     const close = dec(bars[bars.length - 1].c!);
     // Store under the REQUESTED date, not the bar's own date, so the next lookup
     // for this position hits the cache instead of re-deriving the fallback.
-    await prisma.benchmarkClose.upsert({
-      where: { ticker_date: { ticker, date: target } },
-      update: {},
-      create: { ticker, date: target, close: close.toString() },
-    });
+    // Two lookups racing on the same date both try to insert (upsert is not
+    // atomic); the loser's error must not throw away a close it already has.
+    await prisma.benchmarkClose
+      .upsert({
+        where: { ticker_date: { ticker, date: target } },
+        update: {},
+        create: { ticker, date: target, close: close.toString() },
+      })
+      .catch(() => undefined);
     return close;
   } catch {
     // A benchmark is context, never the headline. If it cannot be fetched the
