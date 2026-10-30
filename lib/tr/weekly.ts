@@ -149,11 +149,24 @@ export function defaultIntro(sections: ReportSection[]): string {
   return lines.join("\n");
 }
 
-/** Generate this week's draft. Never overwrites an existing one (it may hold edits). */
+/** Generate this week's draft. Never overwrites one that has been edited or sent. */
 export async function generateWeeklyDraft(today: string = todayNY(), by = "schedule") {
   const weekEnding = weekEndingFor(today);
   const existing = await prisma.trWeeklyReport.findUnique({ where: { weekEnding: new Date(`${weekEnding}T00:00:00Z`) } });
-  if (existing) return { created: false, report: existing };
+  if (existing) {
+    // The noon run brings an untouched draft (made early by hand) up to date;
+    // a draft anyone has edited, or one already sent, is never changed.
+    if (by === "schedule" && existing.status === "DRAFT" && !existing.editedAt) {
+      const content = await refreshedContent(existing.content as unknown as ReportContent, today);
+      const fresh = { ...content, intro: defaultIntro(content.sections) };
+      const report = await prisma.trWeeklyReport.update({
+        where: { id: existing.id },
+        data: { content: fresh as object, generatedAt: new Date(), generatedBy: by },
+      });
+      return { created: false, report };
+    }
+    return { created: false, report: existing };
+  }
   const sections = await buildSections(today);
   const content: ReportContent = {
     subject: `MTA - Weekly Performance Report - ${shortDate(weekEnding)}`,
