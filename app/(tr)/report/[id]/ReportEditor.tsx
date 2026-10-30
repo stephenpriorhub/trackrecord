@@ -170,7 +170,7 @@ export function ReportEditor({
               <label className="flex items-center gap-2 text-sm font-semibold">
                 <input type="checkbox" checked={s.include} onChange={(e) => setSection(si, { include: e.target.checked })} className="accent-brand" />
                 {s.name}
-                <span className="font-normal text-faint">· {s.closedThisWeek} closed this week</span>
+                {s.closedThisWeek >= 0 && <span className="font-normal text-faint">· {s.closedThisWeek} closed this week</span>}
               </label>
               {s.include && (
                 <div className="mt-3 space-y-3">

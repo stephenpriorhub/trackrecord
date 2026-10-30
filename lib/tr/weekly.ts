@@ -12,9 +12,10 @@
  */
 import { prisma } from "../prisma";
 import { loadSummaryTrades, summarise } from "./queries";
-import { SHEET_SERVICES, type ServiceDef } from "./services";
+import { longTermBooks, summariseBooks } from "./longterm";
+import { SHEET_SERVICES, serviceByCode, type ServiceDef } from "./services";
 import { periodBounds, todayNY, type PeriodKey, type PeriodStats } from "./stats";
-import { renderEmail, type ReportContent, type ReportSection, type ReportTable } from "./weekly-render";
+import { parseRecipients, renderEmail, type ReportContent, type ReportSection, type ReportTable } from "./weekly-render";
 
 export * from "./weekly-render";
 
@@ -28,7 +29,11 @@ const COLOR: Record<string, string> = {
   NBS: "#7f6000",
   PMK: "#7c4dff",
   TPU: "#1f3864",
+  XAI: "#0b5394",
 };
+
+/** Long-term services summarised as portfolios (no trade periods) in the report. */
+const PORTFOLIO_SUMMARIES = ["XAI"];
 
 const PERIODS: { key: PeriodKey; label: string }[] = [
   { key: "week", label: "This Week" },
@@ -132,7 +137,47 @@ export async function buildSections(today: string = todayNY()): Promise<ReportSe
       tables,
     });
   }
+  for (const code of PORTFOLIO_SUMMARIES) {
+    const def = serviceByCode(code);
+    if (def) out.push(await portfolioSection(def));
+  }
   return out;
+}
+
+const signed = (x: number | null) => (x === null || !Number.isFinite(x) ? "—" : `${x > 0 ? "+" : ""}${(x * 100).toFixed(2)}%`);
+
+/** McCall-style service: one row per portfolio, returns since each one started. */
+async function portfolioSection(def: ServiceDef): Promise<ReportSection> {
+  const books = summariseBooks(await longTermBooks(def, false)).filter((b) => b.open + b.closed > 0);
+  const since = (d: Date | null) =>
+    d ? ` (since ${d.toLocaleDateString("en-US", { month: "numeric", day: "numeric", year: "2-digit", timeZone: "UTC" })})` : "";
+  return {
+    code: def.code,
+    name: def.name,
+    color: COLOR[def.code] ?? "#1f3864",
+    include: true,
+    // Not trade-by-trade: the intro shouldn't list it as quiet or active.
+    closedThisWeek: -1,
+    note: "",
+    tables: [
+      {
+        title: def.name,
+        columns: ["Positions", "Total Return", "Realized", "Unrealized", "S&P 500 (same period)"],
+        rows: books.map((b) => [
+          `${b.label}${since(b.since)}`,
+          `${b.open} open · ${b.closed} closed`,
+          signed(b.totalReturn),
+          signed(b.realized),
+          signed(b.unrealized),
+          signed(b.spx),
+        ]),
+        best: null,
+        showBest: false,
+        link: await linkFor(def),
+        linkLabel: `View the full ${def.name.replace(/^The /, "")} portfolios →`,
+      },
+    ],
+  };
 }
 
 function list(names: string[]): string {
@@ -141,11 +186,16 @@ function list(names: string[]): string {
 }
 
 export function defaultIntro(sections: ReportSection[]): string {
-  const active = sections.filter((s) => s.closedThisWeek > 0).map((s) => s.name);
-  const quiet = sections.filter((s) => s.closedThisWeek === 0).map((s) => s.name);
+  const trading = sections.filter((s) => s.closedThisWeek >= 0);
+  const active = trading.filter((s) => s.closedThisWeek > 0).map((s) => s.name);
+  const quiet = trading.filter((s) => s.closedThisWeek === 0).map((s) => s.name);
   const lines = ["Good afternoon,", ""];
   lines.push(active.length ? `Below are this week's performance stats for ${list(active)}.` : "No trades closed this week.");
   if (quiet.length && active.length) lines.push("", `No changes to ${list(quiet)}.`);
+  lines.push(
+    "",
+    "You can view the full track record in our new MTA Track Record app inside the OxfordHub. If you don't have an OxfordHub account yet, you can register here: https://oxfordhub.app/register/mta-team",
+  );
   return lines.join("\n");
 }
 
@@ -219,8 +269,22 @@ async function deliver(args: { to: string[]; cc: string[]; replyTo: string; subj
   if (error) throw new Error(error.message ?? String(error));
 }
 
+/**
+ * The starting list (Stephen, 2026-10-30): the old report's To and Cc lines,
+ * plus Matt McCall and Patrick Bove. Written only when no list exists yet —
+ * never over one an admin has saved.
+ */
+const STARTING_TO =
+  "Jonathan Mead <JMead@oxfordclub.com>; John Oravec <joravec@oxfordclub.com>; Ryan Fitzwater <rfitzwater@MonumentTradersAlliance.com>; Bryan Bottarelli <bbottarelli@monumenttradersalliance.com>; Karim Rahemtulla <krahemtulla@oxfordclub.com>; Todd Skousen <TSkousen@OxfordClub.com>; Nathan Bear <nbear@cw.monumenttradersalliance.com>; Kristin Haugk <khaugk@oxfordclub.com>; Chris Jacob <cjjacob@Oxfordclub.com>; Drew Dyer <ddyer@monumenttradersalliance.com>; Amanda Heckman <aheckman@monumenttradersalliance.com>; Chris Johnson <cjohnson@monumenttradersalliance.com>; Matt McCall <mmccall@monumenttradersalliance.com>";
+const STARTING_CC =
+  "Jordan Vass <jvass@monumenttradersalliance.com>; Monica Eppley <meppley@oxfordclub.com>; Kimberly Vogel <kvogel@monumenttradersalliance.com>; Isabel Corral <ICorral@monumenttradersalliance.com>; Oxford Long Form Copywriters <OxfordLongFormCopywriters@oxfordclub.com>; Jarrod Feintuch <jfeintuch@cw.oxfordclub.com>; Connor McKim <cmckim@theagora.com>; John Goff <John.Goff@emeraldcontactcentre.ie>; Nick Pritzakis <npritzakis@cw.monumenttradersalliance.com>; Michael Schussler <mschussler@monumenttradersalliance.com>; Greg Grillot <grillot@gmail.com>; Patrick Bove <pbove@theagora.com>";
+
 export async function reportSettings() {
-  return (await prisma.trReportSettings.findUnique({ where: { id: "weekly" } })) ?? { id: "weekly", to: [], cc: [], updatedAt: null, updatedBy: null };
+  const row = await prisma.trReportSettings.findUnique({ where: { id: "weekly" } });
+  if (row) return row;
+  return prisma.trReportSettings
+    .create({ data: { id: "weekly", to: parseRecipients(STARTING_TO).ok, cc: parseRecipients(STARTING_CC).ok, updatedBy: "starting list" } })
+    .catch(() => prisma.trReportSettings.findUniqueOrThrow({ where: { id: "weekly" } }));
 }
 
 /** A copy to the admin alone. Changes nothing on the report. */

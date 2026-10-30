@@ -10,6 +10,8 @@ export interface ReportTable {
   rows: string[][];
   /** This week's best trade, or null for "none closed this week". */
   best: { position: string; ret: string; days: string } | null;
+  /** False for a portfolio summary, which has no "best trade this week" row. */
+  showBest?: boolean;
   link: string;
   linkLabel: string;
 }
@@ -36,13 +38,17 @@ export interface ReportContent {
 const esc = (s: string) =>
   s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
+/** Web addresses in already-escaped text → links. */
+const linkify = (html: string) =>
+  html.replace(/https?:\/\/[^\s<]+[^\s<.,;:!?)]/g, (u) => `<a href="${u}" style="color:#1155cc">${u}</a>`);
+
 /** Plain text with blank-line paragraphs and single-line breaks → HTML. */
 function paras(text: string): string {
   return text
     .trim()
     .split(/\n\s*\n/)
     .filter(Boolean)
-    .map((p) => `<p style="margin:0 0 12px">${esc(p).replace(/\n/g, "<br>")}</p>`)
+    .map((p) => `<p style="margin:0 0 12px">${linkify(esc(p)).replace(/\n/g, "<br>")}</p>`)
     .join("");
 }
 
@@ -61,7 +67,7 @@ function tableHtml(t: ReportTable, color: string): string {
           .join("")}</tr>`,
     )
     .join("");
-  const best = `<tr><td colspan="${t.columns.length + 1}" style="${CELL}background:#ddebf7;text-align:center;font-weight:bold">This Week's Best Performing Trade</td></tr>${
+  const best = t.showBest === false ? "" : `<tr><td colspan="${t.columns.length + 1}" style="${CELL}background:#ddebf7;text-align:center;font-weight:bold">This Week's Best Performing Trade</td></tr>${
     t.best
       ? `<tr><td style="${CELL}text-align:right;font-weight:bold">Position:</td><td colspan="2" style="${CELL}text-align:center">${esc(t.best.position)}</td><td style="${CELL}text-align:center">${esc(t.best.ret)}</td><td style="${CELL}text-align:center">${esc(t.best.days)} days held</td></tr>`
       : `<tr><td colspan="${t.columns.length + 1}" style="${CELL}text-align:center;color:#7f7f7f">No trades closed this week.</td></tr>`
@@ -95,7 +101,8 @@ export function parseRecipients(text: string): { ok: string[]; bad: string[] } {
   const seen = new Set<string>();
   // Semicolons and newlines separate; commas only in a bare list (an Outlook
   // name can itself be "Last, First").
-  const parts = text.split(/[;\n]+/).flatMap((p) => (p.includes("<") ? [p] : p.split(",")));
+  // A missing separator between two pasted entries ("…com>Jordan Vass <…") is common.
+  const parts = text.replace(/>\s*(?=[^\s;,\n])/g, ">;").split(/[;\n]+/).flatMap((p) => (p.includes("<") ? [p] : p.split(",")));
   for (const raw of parts) {
     const part = raw.trim();
     if (!part) continue;
