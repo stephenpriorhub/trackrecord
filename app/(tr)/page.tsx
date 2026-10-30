@@ -1,13 +1,14 @@
 import Link from "next/link";
 import { MarketStrip } from "@/components/tr/MarketStrip";
-import { ServiceCard, type CardView } from "@/components/tr/ServiceCard";
+import { ServiceCard } from "@/components/tr/ServiceCard";
 import { fmtDate, int, pct, signedPct, tone } from "@/lib/tr/format";
 import { longTermBooks, summariseBooks } from "@/lib/tr/longterm";
 import { marketStrip } from "@/lib/tr/market";
 import { allPublicationInfo } from "@/lib/tr/publications";
-import { loadSummaryTrades, summarise, weekAcrossServices } from "@/lib/tr/queries";
+import { serviceCardData } from "@/lib/tr/card";
+import { loadSummaryTrades, weekAcrossServices } from "@/lib/tr/queries";
 import { SERVICES, SHEET_SERVICES } from "@/lib/tr/services";
-import { periodBounds, statsByPeriod, todayNY } from "@/lib/tr/stats";
+import { periodBounds, todayNY } from "@/lib/tr/stats";
 import { requireViewer } from "@/lib/tr/viewer";
 
 export const dynamic = "force-dynamic";
@@ -32,33 +33,7 @@ export default async function Home() {
 
   const tradeCard = (def: (typeof SHEET_SERVICES)[number]) => {
           const trades = byCode.get(def.code) ?? [];
-          const summary = summarise(def, trades, today);
-          const views: CardView[] = [{ key: "all", label: def.byGuru ? "Combined" : "All", stats: summary.headline }];
-          if (def.bookTables) {
-            // One view per brand, each with its own figures (Trend Advisory first).
-            views.splice(0, 1);
-            for (const sp of def.subPortfolios) {
-              const g = summary.groups.find((x) => x.kind === "portfolio" && x.key === sp.key);
-              if (g) views.push({ key: sp.key, label: sp.years ? `${sp.label.replace(/^Monument /, "")} (${sp.years})` : sp.label, stats: g.stats });
-            }
-          }
-          if (def.bookToggle) {
-            for (const sp of def.subPortfolios) {
-              const g = summary.groups.find((x) => x.kind === "portfolio" && x.key === sp.key);
-              if (g) views.push({ key: sp.key, label: sp.label, stats: g.stats });
-            }
-          }
-          if (def.byGuru) {
-            for (const g of summary.groups.filter((x) => x.kind === "guru")) {
-              views.push({ key: g.key, label: g.label.split(" ")[0], stats: g.stats });
-            }
-          }
-          const excluded = def.bookTables ? [] : def.subPortfolios.filter((p) => !p.inHeadline);
-          let note: string | undefined;
-          if (excluded.length) {
-            const ex = statsByPeriod(trades.filter((t) => excluded.some((p) => p.key === t.portfolio)), today).inception;
-            note = `${excluded.map((p) => p.label).join(", ")} trades are tracked separately (${int(ex.closed)} trades, ${pct(ex.avgReturn)} avg.).`;
-          }
+          const { views, note } = serviceCardData(def, trades, today);
           return (
             <ServiceCard
               key={def.code}

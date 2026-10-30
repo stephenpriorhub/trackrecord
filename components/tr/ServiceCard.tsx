@@ -4,13 +4,9 @@ import Link from "next/link";
 import { useState } from "react";
 import { StatsTable } from "./StatsTable";
 import { pct, tone } from "@/lib/tr/format";
-import type { PeriodKey, PeriodStats } from "@/lib/tr/stats";
 
-export interface CardView {
-  key: string;
-  label: string;
-  stats: Record<PeriodKey, PeriodStats>;
-}
+import type { CardView } from "@/lib/tr/card";
+export type { CardView } from "@/lib/tr/card";
 
 /**
  * One service on the home page: its summary table (with a Combined / per-editor

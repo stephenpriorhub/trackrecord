@@ -2,6 +2,7 @@ import Link from "next/link";
 import { StatsTable } from "./StatsTable";
 import { TradeFilters } from "./TradeFilters";
 import { EditTradeButton } from "./EditTradeButton";
+import { SuggestedTestimonialsButton, TestimonialMatchProvider } from "./SuggestedTestimonials";
 import { chipTone, days, fmtDate, int, pct, price, signedPct, tone, tradeKind } from "@/lib/tr/format";
 import {
   PAGE_SIZE,
@@ -223,7 +224,20 @@ function TradeTable({
   sort?: SortState;
 }) {
   const book = (k: string) => def.subPortfolios.find((p) => p.key === k)?.label;
-  return (
+  // Internal pages only: testimonials are matched in the wiki, which needs a hub login.
+  const matchTrades = flags.internal
+    ? rows.map((r) => ({
+        id: r.id,
+        name: r.name,
+        pubCode: def.code,
+        ticker: r.underlying,
+        openDate: r.openDate.toISOString().slice(0, 10),
+        closeDate: r.closeDate ? r.closeDate.toISOString().slice(0, 10) : null,
+        returnPct: r.returnPct,
+        guru: r.guru,
+      }))
+    : [];
+  const table = (
     <div className="overflow-x-auto rounded-xl border border-line">
       <table className="num w-full min-w-[860px] text-sm">
         <thead className="bg-paper">
@@ -240,6 +254,7 @@ function TradeTable({
             <SortTh label="Return" k="return" sort={sort} right />
             {flags.showBenchmark && <SortTh label={<>S&amp;P same days</>} k="spx" sort={sort} right />}
             {flags.internal && <th className="px-3 py-2.5 text-right font-medium">Airtable</th>}
+            {flags.internal && <th className="px-3 py-2.5 text-right font-medium">Suggested testimonials</th>}
             {flags.canEdit && <th className="px-3 py-2.5" />}
           </tr>
         </thead>
@@ -306,6 +321,11 @@ function TradeTable({
                     )}
                   </td>
                 )}
+                {flags.internal && (
+                  <td className="px-3 py-2.5 text-right">
+                    <SuggestedTestimonialsButton tradeId={r.id} />
+                  </td>
+                )}
                 {flags.canEdit && (
                   <td className="px-2 py-2.5 text-right">
                     {!r.sheetTab.startsWith("Archive") && r.sheetTab !== "Airtable" && <EditTradeButton
@@ -330,7 +350,7 @@ function TradeTable({
           })}
           {rows.length === 0 && (
             <tr>
-              <td colSpan={9} className="px-3 py-10 text-center text-muted">
+              <td colSpan={10} className="px-3 py-10 text-center text-muted">
                 No trades match these filters.
               </td>
             </tr>
@@ -339,6 +359,7 @@ function TradeTable({
       </table>
     </div>
   );
+  return flags.internal ? <TestimonialMatchProvider trades={matchTrades}>{table}</TestimonialMatchProvider> : table;
 }
 
 export function ServiceRecord({
