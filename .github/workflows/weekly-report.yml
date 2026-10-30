@@ -1,0 +1,26 @@
+# Makes the Friday weekly performance report DRAFT at noon ET
+# (app/api/cron/weekly-report). It never sends — an admin reviews and sends
+# from /report in the app.
+name: Weekly report draft
+
+on:
+  schedule:
+    # Noon ET is 16:00 UTC in daylight time and 17:00 UTC in standard time;
+    # the endpoint ignores whichever run isn't noon in New York.
+    - cron: "0 16 * * 5"
+    - cron: "0 17 * * 5"
+  workflow_dispatch:
+
+jobs:
+  draft:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Make the draft
+        env:
+          CRON_SECRET: ${{ secrets.TRACKRECORD_CRON_SECRET }}
+        run: |
+          set -euo pipefail
+          URL="https://trackrecord.oxfordhub.app/api/cron/weekly-report"
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then URL="$URL?force=1"; fi
+          curl --fail-with-body -sS -X POST --max-time 110 -H "x-cron-secret: $CRON_SECRET" "$URL"
+          echo

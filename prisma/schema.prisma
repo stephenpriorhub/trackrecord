@@ -762,3 +762,34 @@ model TrAirtableClose {
 
   @@index([serviceCode, createdAt])
 }
+
+/// The Friday "MTA - Weekly Performance Report" email, one per week. Generated
+/// as a DRAFT (schedule or button), edited, and sent only by an admin pressing
+/// Send. `content` is ReportContent (lib/tr/weekly.ts).
+model TrWeeklyReport {
+  id          String    @id @default(cuid())
+  /// The Friday of the reported week.
+  weekEnding  DateTime  @unique @db.Date
+  content     Json
+  /// DRAFT | SENDING | SENT
+  status      String    @default("DRAFT")
+  generatedAt DateTime  @default(now())
+  generatedBy String
+  editedAt    DateTime?
+  editedBy    String?
+  sentAt      DateTime?
+  sentBy      String?
+  /// The To/Cc lists exactly as sent.
+  sentTo      Json?
+  lastError   String?   @db.Text
+  updatedAt   DateTime  @updatedAt
+}
+
+/// Who the weekly report goes to — the same list every week. Single row, id "weekly".
+model TrReportSettings {
+  id        String   @id
+  to        String[]
+  cc        String[]
+  updatedAt DateTime @updatedAt
+  updatedBy String?
+}
