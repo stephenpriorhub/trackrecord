@@ -146,7 +146,7 @@ export async function buildSections(today: string = todayNY()): Promise<ReportSe
 
 const signed = (x: number | null) => (x === null || !Number.isFinite(x) ? "—" : `${x > 0 ? "+" : ""}${(x * 100).toFixed(2)}%`);
 
-/** McCall-style service: one row per portfolio, returns since each one started. */
+/** McCall-style service: one row per portfolio, returns since each one started. No S&P comparison (Stephen, 2026-10-30). */
 async function portfolioSection(def: ServiceDef): Promise<ReportSection> {
   const books = summariseBooks(await longTermBooks(def, false)).filter((b) => b.open + b.closed > 0);
   const since = (d: Date | null) =>
@@ -162,14 +162,13 @@ async function portfolioSection(def: ServiceDef): Promise<ReportSection> {
     tables: [
       {
         title: def.name,
-        columns: ["Positions", "Total Return", "Realized", "Unrealized", "S&P 500 (same period)"],
+        columns: ["Positions", "Total Return", "Realized", "Unrealized"],
         rows: books.map((b) => [
           `${b.label}${since(b.since)}`,
           `${b.open} open · ${b.closed} closed`,
           signed(b.totalReturn),
           signed(b.realized),
           signed(b.unrealized),
-          signed(b.spx),
         ]),
         best: null,
         showBest: false,
