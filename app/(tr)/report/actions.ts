@@ -7,6 +7,7 @@ import {
   MAX_RECIPIENTS,
   generateWeeklyDraft,
   parseRecipients,
+  rebuiltContent,
   refreshedContent,
   sendReport,
   sendTest,
@@ -76,4 +77,17 @@ export async function saveRecipients(toText: string, ccText: string): Promise<{ 
   });
   revalidatePath("/report");
   return { bad: [...to.bad, ...cc.bad] };
+}
+
+/** Start the draft over from the current template and numbers (discards edits). */
+export async function rebuildDraft(id: string): Promise<ReportContent> {
+  await requireAdmin();
+  const r = await editable(id);
+  const next = await rebuiltContent(r.content as unknown as ReportContent);
+  await prisma.trWeeklyReport.updateMany({
+    where: { id: r.id, status: "DRAFT" },
+    data: { content: next as object, generatedAt: new Date(), editedAt: null, editedBy: null },
+  });
+  revalidatePath(`/report/${id}`);
+  return next;
 }

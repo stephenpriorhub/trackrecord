@@ -235,6 +235,12 @@ export async function generateWeeklyDraft(today: string = todayNY(), by = "sched
   }
 }
 
+/** A whole new draft body (sections + default opening), keeping the subject. */
+export async function rebuiltContent(content: ReportContent, today: string = todayNY()): Promise<ReportContent> {
+  const sections = await buildSections(today);
+  return { subject: content.subject, intro: defaultIntro(sections), closing: "", sections };
+}
+
 /** Rebuilt numbers, keeping each section's note and include switch. */
 export async function refreshedContent(content: ReportContent, today: string = todayNY()): Promise<ReportContent> {
   const fresh = await buildSections(today);

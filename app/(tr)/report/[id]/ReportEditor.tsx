@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useMemo, useState, useTransition } from "react";
 import { renderEmail, type ReportContent } from "@/lib/tr/weekly-render";
-import { refreshNumbers, saveReport, sendTestToMe, sendToList } from "../actions";
+import { rebuildDraft, refreshNumbers, saveReport, sendTestToMe, sendToList } from "../actions";
 
 const field = "w-full rounded-lg border border-line bg-white px-3 py-2 text-sm text-ink focus:border-brand focus:outline-none";
 const label = "mb-1 block text-xs font-medium text-muted";
@@ -111,6 +111,23 @@ export function ReportEditor({
               className={`${btn} border border-line bg-card text-ink hover:border-brand`}
             >
               Refresh numbers
+            </button>
+            <button
+              type="button"
+              disabled={pending}
+              onClick={() =>
+                run(async () => {
+                  if (!confirm("Start this draft over? Every edit and note is replaced with a fresh draft from the current numbers.")) return;
+                  const next = await rebuildDraft(id);
+                  setC(next);
+                  setGenAt(new Date().toISOString());
+                  setDirty(false);
+                  return "Draft rebuilt from scratch.";
+                })
+              }
+              className={`${btn} border border-line bg-card text-ink hover:border-brand`}
+            >
+              Rebuild draft
             </button>
             <button
               type="button"
