@@ -125,7 +125,8 @@ export function SuggestedTestimonialsButton({ tradeId }: { tradeId: string }) {
                   <span className={`font-semibold ${tone(trade.returnPct)}`}>{signedPct(trade.returnPct)}</span>
                 </p>
                 <p className="mt-1 text-xs text-faint">
-                  Same service and ticker, posted while the trade was open or within 3 days of the close. Check the
+                  Same service and ticker, posted while the trade was open or within 2 days of the close, and not
+                  crediting a different editor. Each testimonial is suggested for the one trade it fits best. Check the
                   member is talking about this trade before using one.
                 </p>
               </div>
