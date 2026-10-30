@@ -90,6 +90,7 @@ export const PUB_EDITORS: Record<string, string[]> = {
   TPU: ["bryan", "karim"], // genuinely co-managed
   PMK: ["bryan"],
   XAI: ["matt"],
+  SAT: ["matt"],
   NBS: ["nate"],
   PSU: ["nate"],
   DPL: ["nate"],
@@ -105,6 +106,7 @@ export const PUB_EDITORS: Record<string, string[]> = {
  */
 export const PUBLICATION_OWNER: Record<string, string> = {
   XAI: "matt",
+  SAT: "matt", // Early Opportunities: Matt McCall's, like XAI
 };
 
 /** The sole editor of a publication, or null when it has more than one. */

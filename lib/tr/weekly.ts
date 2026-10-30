@@ -30,10 +30,11 @@ const COLOR: Record<string, string> = {
   PMK: "#7c4dff",
   TPU: "#1f3864",
   XAI: "#0b5394",
+  SAT: "#38761d",
 };
 
 /** Long-term services summarised as portfolios (no trade periods) in the report. */
-const PORTFOLIO_SUMMARIES = ["XAI"];
+const PORTFOLIO_SUMMARIES = ["XAI", "SAT"];
 
 const PERIODS: { key: PeriodKey; label: string }[] = [
   { key: "week", label: "This Week" },
@@ -173,7 +174,7 @@ async function portfolioSection(def: ServiceDef): Promise<ReportSection> {
         best: null,
         showBest: false,
         link: await linkFor(def),
-        linkLabel: `View the full ${def.name.replace(/^The /, "")} portfolios →`,
+        linkLabel: `View the full ${def.name.replace(/^The /, "")} ${books.length > 1 ? "portfolios" : "portfolio"} →`,
       },
     ],
   };

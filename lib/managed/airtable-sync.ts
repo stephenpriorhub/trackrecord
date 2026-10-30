@@ -269,6 +269,13 @@ function describe(fills: { intent: string; quantity: number; price: string | D; 
 }
 
 /**
+ * Publications kept in Airtable from the start, so their FIRST sync may import
+ * into an empty book. Every other publication must already hold Airtable
+ * imports (see the guard below). Early Opportunities joined Airtable 2026-10-29.
+ */
+const AIRTABLE_FED_PUBS = new Set(["XAI", "SAT"]);
+
+/**
  * Bring one publication's Airtable-sourced positions in line with Airtable.
  *
  * New positions are created through the existing import first (so portfolio
@@ -304,7 +311,7 @@ export async function syncPublicationFromAirtable(
       portfolio: { service: { pubCode } },
     },
   });
-  if (fed === 0) {
+  if (fed === 0 && !AIRTABLE_FED_PUBS.has(pubCode)) {
     throw new Error(`${pubCode} is not maintained from Airtable; nothing synced.`);
   }
 

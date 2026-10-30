@@ -11,7 +11,7 @@
 // layer may speak Airtable codes; Postgres, the APIs and the dashboard use the real ones.
 
 /** Pub Code values as they appear in the Airtable Portfolio Tracker base. */
-export const AIRTABLE_PUB_CODES = ['TPU', 'MTA', 'PMR', 'XAI', 'NBS', 'PSU', 'DPL'] as const
+export const AIRTABLE_PUB_CODES = ['TPU', 'MTA', 'PMR', 'XAI', 'NBS', 'PSU', 'DPL', 'SAT'] as const
 
 /** Airtable Pub Code -> the publication's real pub code. */
 export const AIRTABLE_TO_PUB_CODE: Record<string, string> = {
@@ -22,6 +22,7 @@ export const AIRTABLE_TO_PUB_CODE: Record<string, string> = {
   NBS: 'NBS',
   PSU: 'PSU',
   DPL: 'DPL',
+  SAT: 'SAT',
 }
 
 export const PUB_NAMES: Record<string, string> = {
@@ -32,6 +33,7 @@ export const PUB_NAMES: Record<string, string> = {
   NBS: "Nate Bear's Sector Strike",
   PSU: 'Profit Surge Trader',
   DPL: 'Daily Profits Live',
+  SAT: 'Early Opportunities',
 }
 
 /**
@@ -53,7 +55,7 @@ export function pubName(code: string): string {
 
 /** Dropdown/filter options, in the order they should be shown. */
 export const PUB_OPTIONS = (
-  ['WAR', 'PMK', 'TPU', 'XAI', 'PSU', 'DPL', 'NBS'] as const
+  ['WAR', 'PMK', 'TPU', 'XAI', 'SAT', 'PSU', 'DPL', 'NBS'] as const
 ).map(value => ({ value, label: PUB_NAMES[value] }))
 
 /**

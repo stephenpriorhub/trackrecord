@@ -28,7 +28,7 @@ const GURU_NAMES: Record<string, { slug: string; name: string }> = {
 // would be meaningless anyway. Trend Advisory (TPU) is genuinely co-managed and is
 // deliberately absent — pending a verified TPU owner sheet, a position with no per-trade
 // owner there still falls back to both editors.
-const SINGLE_OWNER_PUBS = new Set(['WAR', 'PMK', 'XAI', 'NBS', 'PSU', 'DPL'])
+const SINGLE_OWNER_PUBS = new Set(['WAR', 'PMK', 'XAI', 'SAT', 'NBS', 'PSU', 'DPL'])
 
 // Airtable's "Reporting Guru(s)" field (and the underlying editor fields) are wildly
 // inconsistent across the three services: initials ('B', 'K'), first names ('Bryan'),
@@ -138,6 +138,7 @@ async function syncPub(airtableCode: string) {
         WAR: ['bryan', 'karim'], // The War Room — Bryan & Karim (each pick owned by one of them)
         PMK: ['bryan'],          // Post-Market Profits — Bryan Bottarelli only
         XAI: ['matt'],           // McCall Innovation Report — Matt McCall only
+        SAT: ['matt'],           // Early Opportunities — Matt McCall only
         NBS: ['nate'],           // Nate Bear's Sector Strike
         PSU: ['nate'],           // Profit Surge Trader
         DPL: ['nate'],           // Daily Profits Live
