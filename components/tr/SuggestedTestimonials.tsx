@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useContext, useEffect, useState } from "react";
+import { createContext, useContext, useEffect, useMemo, useState } from "react";
 import { fmtDate, pct, signedPct, tone } from "@/lib/tr/format";
 
 /**
@@ -45,14 +45,17 @@ interface MatchState {
 const Ctx = createContext<MatchState | null>(null);
 
 export function TestimonialMatchProvider({ trades, children }: { trades: MatchTrade[]; children: React.ReactNode }) {
-  const [state, setState] = useState<MatchState>({
-    loading: true,
-    error: null,
-    matches: {},
-    gridUrls: {},
-    trades: Object.fromEntries(trades.map((t) => [t.id, t])),
-  });
+  // Paging re-renders this same provider with a new page of trades, so nothing
+  // about the trades may be captured in state: the lookup map is derived from
+  // props, and fetched results are tagged with the page they belong to.
   const key = trades.map((t) => t.id).join(",");
+  const [result, setResult] = useState<{
+    key: string;
+    error: string | null;
+    matches: Record<string, Testimonial[]>;
+    gridUrls: Record<string, string>;
+  } | null>(null);
+  const byId = useMemo(() => Object.fromEntries(trades.map((t) => [t.id, t])), [trades]);
 
   useEffect(() => {
     if (!trades.length) return;
@@ -64,10 +67,11 @@ export function TestimonialMatchProvider({ trades, children }: { trades: MatchTr
     })
       .then((r) => r.json())
       .then((d) => {
-        if (!live) return;
-        setState((s) => ({ ...s, loading: false, error: d.error ?? null, matches: d.matches ?? {}, gridUrls: d.gridUrls ?? {} }));
+        if (live) setResult({ key, error: d.error ?? null, matches: d.matches ?? {}, gridUrls: d.gridUrls ?? {} });
       })
-      .catch((e) => live && setState((s) => ({ ...s, loading: false, error: String(e) })));
+      .catch((e) => {
+        if (live) setResult({ key, error: String(e), matches: {}, gridUrls: {} });
+      });
     return () => {
       live = false;
     };
@@ -75,6 +79,14 @@ export function TestimonialMatchProvider({ trades, children }: { trades: MatchTr
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key]);
 
+  const current = result?.key === key ? result : null;
+  const state: MatchState = {
+    loading: !current,
+    error: current?.error ?? null,
+    matches: current?.matches ?? {},
+    gridUrls: current?.gridUrls ?? {},
+    trades: byId,
+  };
   return <Ctx.Provider value={state}>{children}</Ctx.Provider>;
 }
 
@@ -99,6 +111,7 @@ export function SuggestedTestimonialsButton({ tradeId }: { tradeId: string }) {
   const items = ctx.matches[tradeId] ?? [];
   if (!items.length) return <span className="text-xs text-faint" title={ctx.error ?? "No matching testimonials in the wiki"}>—</span>;
   const trade = ctx.trades[tradeId];
+  if (!trade) return null;
 
   return (
     <>
